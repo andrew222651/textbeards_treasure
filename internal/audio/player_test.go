@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -137,6 +138,48 @@ func TestMusicPlayerSwitchesToTavernAndBack(t *testing.T) {
 	})
 }
 
+func TestMusicPlayerResumesInterruptedTrackFromLastOffset(t *testing.T) {
+	callsPath := installBlockingFakeFFPlay(t)
+
+	player := NewMusicPlayer()
+	player.Start()
+	defer player.Stop()
+	waitForRecordedCalls(t, callsPath, func(calls string) bool {
+		return strings.Contains(calls, "pirates-default-music-")
+	})
+
+	player.EnterPort()
+	waitForRecordedCalls(t, callsPath, func(calls string) bool {
+		return strings.Contains(calls, "pirates-tavern-music-")
+	})
+	waitForCondition(t, func() bool {
+		return player.trackOffset(defaultMusicTrack) > 0
+	})
+
+	player.LeavePort()
+	waitForRecordedCalls(t, callsPath, func(calls string) bool {
+		for _, line := range strings.Split(calls, "\n") {
+			if strings.Contains(line, "pirates-default-music-") && strings.Contains(line, "-ss") {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func TestMusicCommandArgsIncludeSeekOffsets(t *testing.T) {
+	offset := 1500 * time.Millisecond
+	if got := strings.Join(musicCommands()[0].argsFor("song.wav", offset), " "); !strings.Contains(got, "-ss 1.500 song.wav") {
+		t.Fatalf("expected ffplay seek args before path, got %q", got)
+	}
+	if got := strings.Join(musicCommands()[1].argsFor("song.wav", offset), " "); !strings.Contains(got, "--start=1.500 song.wav") {
+		t.Fatalf("expected mpv seek args before path, got %q", got)
+	}
+	if got := strings.Join(musicCommands()[2].argsFor("song.wav", offset), " "); !strings.Contains(got, "song.wav trim 1.500") {
+		t.Fatalf("expected SoX play seek args after path, got %q", got)
+	}
+}
+
 func installFakeFFPlay(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -147,6 +190,25 @@ func installFakeFFPlay(t *testing.T) string {
 	}
 	t.Setenv("PATH", dir)
 	t.Setenv("CALLS_PATH", callsPath)
+	return callsPath
+}
+
+func installBlockingFakeFFPlay(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	callsPath := filepath.Join(dir, "calls")
+	blockPath := filepath.Join(dir, "block")
+	if err := syscall.Mkfifo(blockPath, 0o600); err != nil {
+		t.Fatalf("create blocking fifo: %v", err)
+	}
+	fakeFFPlay := filepath.Join(dir, "ffplay")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CALLS_PATH\"\nread _ < \"$BLOCK_PATH\"\n"
+	if err := os.WriteFile(fakeFFPlay, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake ffplay: %v", err)
+	}
+	t.Setenv("PATH", dir)
+	t.Setenv("CALLS_PATH", callsPath)
+	t.Setenv("BLOCK_PATH", blockPath)
 	return callsPath
 }
 
@@ -163,4 +225,16 @@ func waitForRecordedCalls(t *testing.T, callsPath string, done func(string) bool
 	}
 	data, _ := os.ReadFile(callsPath)
 	t.Fatalf("timed out waiting for recorded calls, got %q", data)
+}
+
+func waitForCondition(t *testing.T, done func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if done() {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for condition")
 }

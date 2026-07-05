@@ -32,9 +32,10 @@ go run ./cmd/pirates
 
 Press `Esc` or `Ctrl-C` to quit.
 
-Music playback is best-effort through the first available local audio command:
-`ffplay`, `mpv`, `pw-play`, `paplay`, `ogg123`, `play`, `aplay`, or
-`canberra-gtk-play`. If none is installed, the game continues silently.
+Music playback is best-effort through the first available seek-capable local
+audio command: `ffplay`, `mpv`, or `play`. Cannon fire sounds can also use
+`pw-play`, `paplay`, `ogg123`, `aplay`, or `canberra-gtk-play`. If none is
+installed, the game continues silently.
 
 
 ## Terminal support

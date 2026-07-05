@@ -3,6 +3,7 @@ package audio
 import (
 	"context"
 	"embed"
+	"fmt"
 	"os"
 	"os/exec"
 	"sync"
@@ -20,8 +21,22 @@ const (
 var embeddedAssets embed.FS
 
 type playerCommand struct {
-	name string
-	args []string
+	name           string
+	args           []string
+	seekBeforePath func(time.Duration) []string
+	seekAfterPath  func(time.Duration) []string
+}
+
+func (c playerCommand) argsFor(path string, offset time.Duration) []string {
+	args := append([]string{}, c.args...)
+	if offset > 0 && c.seekBeforePath != nil {
+		args = append(args, c.seekBeforePath(offset)...)
+	}
+	args = append(args, path)
+	if offset > 0 && c.seekAfterPath != nil {
+		args = append(args, c.seekAfterPath(offset)...)
+	}
+	return args
 }
 
 // CannonFirePlayer plays the embedded cannon sound through the first available
@@ -51,9 +66,7 @@ func (p *CannonFirePlayer) Play() {
 		return
 	}
 
-	args := append([]string{}, command.args...)
-	args = append(args, path)
-	cmd := exec.Command(command.name, args...)
+	cmd := exec.Command(command.name, command.argsFor(path, 0)...)
 	if err := cmd.Start(); err != nil {
 		return
 	}
@@ -108,14 +121,15 @@ type musicLoop struct {
 	done   chan struct{}
 }
 
-// MusicPlayer loops embedded music until stopped. Missing audio tools are
-// treated as a silent no-op.
+// MusicPlayer loops embedded music until stopped. Missing seek-capable audio
+// tools are treated as a silent no-op.
 type MusicPlayer struct {
 	mu          sync.Mutex
 	commandOnce sync.Once
 	stopOnce    sync.Once
 	paths       map[musicTrack]string
 	prepareErrs map[musicTrack]error
+	offsets     map[musicTrack]time.Duration
 	command     *playerCommand
 	current     *musicLoop
 	active      map[*musicLoop]struct{}
@@ -229,10 +243,18 @@ func (p *MusicPlayer) loop(ctx context.Context, loop *musicLoop, command playerC
 	}()
 
 	for ctx.Err() == nil {
-		args := append([]string{}, command.args...)
-		args = append(args, path)
-		cmd := exec.CommandContext(ctx, command.name, args...)
-		_ = cmd.Run()
+		offset := p.trackOffset(loop.track)
+		startedAt := time.Now()
+		cmd := exec.CommandContext(ctx, command.name, command.argsFor(path, offset)...)
+		err := cmd.Run()
+
+		if ctx.Err() != nil {
+			p.setTrackOffset(loop.track, offset+time.Since(startedAt))
+			return
+		}
+		if err == nil {
+			p.setTrackOffset(loop.track, 0)
+		}
 
 		select {
 		case <-ctx.Done():
@@ -240,6 +262,24 @@ func (p *MusicPlayer) loop(ctx context.Context, loop *musicLoop, command playerC
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
+}
+
+func (p *MusicPlayer) trackOffset(track musicTrack) time.Duration {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.offsets[track]
+}
+
+func (p *MusicPlayer) setTrackOffset(track musicTrack, offset time.Duration) {
+	if offset < 0 {
+		offset = 0
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.offsets == nil {
+		p.offsets = make(map[musicTrack]time.Duration)
+	}
+	p.offsets[track] = offset
 }
 
 func stopMusicLoopAfter(loop *musicLoop, delay time.Duration) {
@@ -355,13 +395,27 @@ func cannonFireCommands() []playerCommand {
 
 func musicCommands() []playerCommand {
 	return []playerCommand{
-		{name: "ffplay", args: []string{"-nodisp", "-autoexit", "-loglevel", "quiet"}},
-		{name: "mpv", args: []string{"--no-terminal", "--really-quiet"}},
-		{name: "pw-play"},
-		{name: "paplay"},
-		{name: "ogg123", args: []string{"-q"}},
-		{name: "play", args: []string{"-q"}},
-		{name: "aplay", args: []string{"-q"}},
-		{name: "canberra-gtk-play", args: []string{"-f"}},
+		{name: "ffplay", args: []string{"-nodisp", "-autoexit", "-loglevel", "quiet"}, seekBeforePath: ffplaySeekArgs},
+		{name: "mpv", args: []string{"--no-terminal", "--really-quiet"}, seekBeforePath: mpvSeekArgs},
+		{name: "play", args: []string{"-q"}, seekAfterPath: soxPlaySeekArgs},
 	}
+}
+
+func ffplaySeekArgs(offset time.Duration) []string {
+	return []string{"-ss", seekSeconds(offset)}
+}
+
+func mpvSeekArgs(offset time.Duration) []string {
+	return []string{"--start=" + seekSeconds(offset)}
+}
+
+func soxPlaySeekArgs(offset time.Duration) []string {
+	return []string{"trim", seekSeconds(offset)}
+}
+
+func seekSeconds(offset time.Duration) string {
+	if offset < 0 {
+		offset = 0
+	}
+	return fmt.Sprintf("%.3f", offset.Seconds())
 }
