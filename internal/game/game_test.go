@@ -1587,6 +1587,22 @@ func TestSpawnedEnemyDisappearsWhenItReachesMapEdge(t *testing.T) {
 	}
 }
 
+func TestRandomEnemyShipKindSelectsSmallShipsAboutOneQuarterOfTheTime(t *testing.T) {
+	rng := rand.New(rand.NewSource(1))
+	small := 0
+	total := 4000
+	for i := 0; i < total; i++ {
+		if randomEnemyShipKind(rng) == EnemyShipSmall {
+			small++
+		}
+	}
+
+	ratio := float64(small) / float64(total)
+	if ratio < 0.22 || ratio > 0.28 {
+		t.Fatalf("expected small enemy selection near 25%%, got %.3f from %d/%d", ratio, small, total)
+	}
+}
+
 func TestEnemyShipsSpawnOccasionallyOffScreenAndOutsideCannonRange(t *testing.T) {
 	g := New(Config{
 		Width:              200,
@@ -1850,6 +1866,35 @@ func TestShipHitCallbackRunsForPlayerHits(t *testing.T) {
 	}
 }
 
+func TestSmallEnemyHasTwoHitPointsAndAwardsTwentyFiveGold(t *testing.T) {
+	sunk := 0
+	g := New(Config{Width: 40, Height: 20, OnEnemySunk: func() { sunk++ }})
+	g.enemy.Kind = EnemyShipSmall
+	g.enemy.hitPoints = enemyShipHitPoints(EnemyShipSmall)
+
+	hitPrimaryEnemy(g, LoadGrapeShot)
+	if _, ok := g.Enemy(); !ok {
+		t.Fatal("expected small enemy to survive one damage")
+	}
+	if got := g.enemy.hitPoints; got != 1 {
+		t.Fatalf("expected small enemy to have 1 hit point after one grape shot, got %d", got)
+	}
+	if got := g.Gold(); got != defaultGold {
+		t.Fatalf("expected no reward before sinking small enemy, got %d", got)
+	}
+
+	hitPrimaryEnemy(g, LoadGrapeShot)
+	if _, ok := g.Enemy(); ok {
+		t.Fatal("expected second damage to destroy small enemy")
+	}
+	if got := g.Gold(); got != defaultGold+smallEnemySunkReward {
+		t.Fatalf("expected sinking small enemy to award %d gold, got %d", smallEnemySunkReward, got)
+	}
+	if sunk != 1 {
+		t.Fatalf("expected sink callback once, got %d", sunk)
+	}
+}
+
 func TestEnemyIsDestroyedAfterFiveDamage(t *testing.T) {
 	sunk := 0
 	g := New(Config{Width: 40, Height: 20, OnEnemySunk: func() { sunk++ }})
@@ -1938,6 +1983,32 @@ func TestFiveGrapeShotHitsDestroyEnemy(t *testing.T) {
 	}
 	if got := len(g.Shots()); got != 0 {
 		t.Fatalf("expected fifth grape shot to disappear on hit, got %d shots", got)
+	}
+}
+
+func TestSmallEnemyFiresForwardDeckGunForOneDamage(t *testing.T) {
+	g := New(Config{Width: 80, Height: 40, ShotSpeed: 1, EnemyAggroRange: 20})
+	g.enemy.Kind = EnemyShipSmall
+	g.enemy.hitPoints = enemyShipHitPoints(EnemyShipSmall)
+	g.enemy.Position = Position{X: 40, Y: 20}
+	g.enemy.Heading = HeadingW
+	g.ship = Position{X: 30, Y: 20}
+
+	g.Update(time.Millisecond)
+
+	shots := g.Shots()
+	if len(shots) != 1 {
+		t.Fatalf("expected small enemy to fire one deck-gun shot, got %d", len(shots))
+	}
+	if shots[0].Owner != ShotOwnerEnemy || shots[0].Load != LoadDeckGun || shots[0].Heading != HeadingW {
+		t.Fatalf("expected enemy deck-gun shot heading west, got %#v", shots[0])
+	}
+	assertPosition(t, shots[0].Position, 37, 20)
+
+	g.shots = []Shot{{Position: g.ship, Load: LoadDeckGun, Owner: ShotOwnerEnemy}}
+	g.Update(time.Nanosecond)
+	if got, want := g.PlayerHitPoints(), shipHitPoints-deckGunDamage; got != want {
+		t.Fatalf("expected deck gun to do %d damage, got HP %d/%d", deckGunDamage, got, shipHitPoints)
 	}
 }
 

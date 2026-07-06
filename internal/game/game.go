@@ -22,10 +22,14 @@ const (
 	enemySpawnClearance           = 8
 	defaultGold                   = 100
 	shipHitPoints                 = 5
+	smallEnemyHitPoints           = 2
 	cannonballDamage              = 2
 	grapeShotDamage               = 1
+	deckGunDamage                 = 1
 	shipRepairFee                 = 25
 	enemySunkReward               = 50
+	smallEnemySunkReward          = 25
+	smallEnemySpawnChance         = 4
 	defaultCargoCapacity          = 10
 	upgradeCost                   = 1000
 	hullUpgradeHitPoints          = 2
@@ -66,6 +70,7 @@ type CannonLoad int
 const (
 	LoadCannonballs CannonLoad = iota
 	LoadGrapeShot
+	LoadDeckGun
 )
 
 type CannonSide int
@@ -82,9 +87,17 @@ const (
 	ShotOwnerEnemy
 )
 
+type EnemyShipKind int
+
+const (
+	EnemyShipRegular EnemyShipKind = iota
+	EnemyShipSmall
+)
+
 type EnemyShip struct {
 	Position       Position
 	Heading        Heading
+	Kind           EnemyShipKind
 	hitPoints      int
 	cannonLoad     CannonLoad
 	cannonCooldown time.Duration
@@ -1054,21 +1067,21 @@ func (g *Game) moveEnemyForward(enemy *EnemyShip, dt time.Duration) bool {
 	dx, dy := headingStep(enemy.Heading)
 	for step := 0; step < steps; step++ {
 		next := Position{X: enemy.Position.X + float64(dx), Y: enemy.Position.Y + float64(dy)}
-		if g.shipIntersectsIsland(next, enemy.Heading) {
+		if g.enemyIntersectsIsland(*enemy, next) {
 			enemy.Heading = rotatedHeading(enemy.Heading, 1)
 			enemy.moveRemainder = 0
 			return false
 		}
 		enemy.Position = next
-		if g.shipTouchesMapEdge(enemy.Position, enemy.Heading) {
+		if g.enemyTouchesMapEdge(*enemy) {
 			return true
 		}
 	}
 	return false
 }
 
-func (g *Game) shipTouchesMapEdge(position Position, heading Heading) bool {
-	for _, cell := range shipFootprint(position, heading) {
+func (g *Game) enemyTouchesMapEdge(enemy EnemyShip) bool {
+	for _, cell := range enemyFootprint(enemy) {
 		if cell.x <= 0 || cell.y <= 0 || cell.x >= g.width-1 || cell.y >= g.height-1 {
 			return true
 		}
@@ -1085,6 +1098,18 @@ func (g *Game) updateEnemyShipAI(enemy *EnemyShip, turnElapsed *time.Duration, c
 	shotHeading := headingToward(enemy.Position, g.ship)
 	if g.enemyNeedsToClose(enemy.Position) {
 		g.rotateEnemyToward(enemy, turnElapsed, shotHeading, dt)
+		return
+	}
+
+	if enemy.Kind == EnemyShipSmall {
+		if !g.rotateEnemyToward(enemy, turnElapsed, shotHeading, dt) {
+			return
+		}
+		if *cannonCooldown > 0 {
+			return
+		}
+		g.fireDeckGunFrom(enemy.Position, enemy.Heading, ShotOwnerEnemy)
+		*cannonCooldown = g.enemyCannonCooldownDuration
 		return
 	}
 
@@ -1215,10 +1240,13 @@ func (g *Game) spawnEnemyShip() bool {
 				Y: float64(minY + rng.Intn(maxY-minY+1)),
 			},
 			Heading:    Heading(rng.Intn(int(headingCount))),
-			hitPoints:  shipHitPoints,
+			Kind:       EnemyShipRegular,
+			hitPoints:  enemyShipHitPoints(EnemyShipRegular),
 			cannonLoad: LoadCannonballs,
 		}
 		if g.validEnemySpawn(enemy) {
+			enemy.Kind = randomEnemyShipKind(rng)
+			enemy.hitPoints = enemyShipHitPoints(enemy.Kind)
 			g.spawnedEnemies = append(g.spawnedEnemies, enemy)
 			return true
 		}
@@ -1230,7 +1258,7 @@ func (g *Game) validEnemySpawn(enemy EnemyShip) bool {
 	if !g.inBounds(enemy.Position) {
 		return false
 	}
-	if g.shipIntersectsIsland(enemy.Position, enemy.Heading) {
+	if g.enemyIntersectsIsland(enemy, enemy.Position) {
 		return false
 	}
 	if g.enemyWithinCannonRange(enemy) {
@@ -1249,11 +1277,11 @@ func (g *Game) validEnemySpawn(enemy EnemyShip) bool {
 }
 
 func (g *Game) enemyTooCloseToEnemies(enemy EnemyShip) bool {
-	if !g.enemyDestroyed && shipsTooClose(enemy.Position, enemy.Heading, g.enemy.Position, g.enemy.Heading, enemySpawnClearance) {
+	if !g.enemyDestroyed && enemyShipsTooClose(enemy, g.enemy, enemySpawnClearance) {
 		return true
 	}
 	for _, existing := range g.spawnedEnemies {
-		if shipsTooClose(enemy.Position, enemy.Heading, existing.Position, existing.Heading, enemySpawnClearance) {
+		if enemyShipsTooClose(enemy, existing, enemySpawnClearance) {
 			return true
 		}
 	}
@@ -1263,7 +1291,7 @@ func (g *Game) enemyTooCloseToEnemies(enemy EnemyShip) bool {
 func (g *Game) enemyTooCloseToPorts(enemy EnemyShip) bool {
 	for _, port := range g.ports {
 		bounds := portBounds(port, g.width, g.height)
-		for _, cell := range shipFootprint(enemy.Position, enemy.Heading) {
+		for _, cell := range enemyFootprint(enemy) {
 			if bounds.containsWithin(cell, enemySpawnClearance) {
 				return true
 			}
@@ -1276,7 +1304,7 @@ func (g *Game) enemyWithinCannonRange(enemy EnemyShip) bool {
 	if g.cannonRange <= 0 {
 		return false
 	}
-	for _, cell := range shipFootprint(enemy.Position, enemy.Heading) {
+	for _, cell := range enemyFootprint(enemy) {
 		dx := float64(cell.x) - g.ship.X
 		dy := float64(cell.y) - g.ship.Y
 		if math.Hypot(dx, dy) <= g.cannonRange {
@@ -1288,7 +1316,7 @@ func (g *Game) enemyWithinCannonRange(enemy EnemyShip) bool {
 
 func (g *Game) enemyVisible(enemy EnemyShip) bool {
 	bounds := g.visibleBounds()
-	for _, cell := range shipFootprint(enemy.Position, enemy.Heading) {
+	for _, cell := range enemyFootprint(enemy) {
 		if cell.x >= bounds.left && cell.x <= bounds.right && cell.y >= bounds.top && cell.y <= bounds.bottom {
 			return true
 		}
@@ -1467,6 +1495,15 @@ func (g *Game) fireCannonFrom(position Position, shipHeading Heading, load Canno
 	}
 }
 
+func (g *Game) fireDeckGunFrom(position Position, heading Heading, owner ShotOwner) {
+	base := cannonMouthPosition(position, heading)
+	before := len(g.shots)
+	g.addShot(base, heading, LoadDeckGun, owner)
+	if len(g.shots) > before && g.onCannonFire != nil {
+		g.onCannonFire()
+	}
+}
+
 func cannonMouthPosition(position Position, shotHeading Heading) Position {
 	dx, dy := headingStep(shotHeading)
 	return Position{X: position.X + float64(dx*3), Y: position.Y + float64(dy*3)}
@@ -1537,13 +1574,13 @@ func (g *Game) applyShotHit(shot Shot) bool {
 }
 
 func (g *Game) applyEnemyShotHit(shot Shot) bool {
-	if !g.enemyDestroyed && shotIntersectsShip(shot, g.enemy.Position, g.enemy.Heading) {
+	if !g.enemyDestroyed && shotIntersectsEnemy(shot, g.enemy) {
 		g.applyPrimaryEnemyDamage(shot.Load)
 		return true
 	}
 
 	for i := range g.spawnedEnemies {
-		if shotIntersectsShip(shot, g.spawnedEnemies[i].Position, g.spawnedEnemies[i].Heading) {
+		if shotIntersectsEnemy(shot, g.spawnedEnemies[i]) {
 			g.applySpawnedEnemyDamage(i, shot.Load)
 			return true
 		}
@@ -1555,8 +1592,9 @@ func (g *Game) applyPrimaryEnemyDamage(load CannonLoad) {
 	g.enemy.hitPoints -= shotDamage(load)
 	g.notifyShipHit()
 	if g.enemy.hitPoints <= 0 {
+		reward := enemyShipReward(g.enemy.Kind)
 		g.enemyDestroyed = true
-		g.awardEnemySunkReward()
+		g.awardEnemySunkReward(reward)
 	}
 }
 
@@ -1567,8 +1605,9 @@ func (g *Game) applySpawnedEnemyDamage(index int, load CannonLoad) {
 	g.spawnedEnemies[index].hitPoints -= shotDamage(load)
 	g.notifyShipHit()
 	if g.spawnedEnemies[index].hitPoints <= 0 {
+		reward := enemyShipReward(g.spawnedEnemies[index].Kind)
 		g.removeSpawnedEnemy(index)
-		g.awardEnemySunkReward()
+		g.awardEnemySunkReward(reward)
 	}
 }
 
@@ -1578,8 +1617,8 @@ func (g *Game) notifyShipHit() {
 	}
 }
 
-func (g *Game) awardEnemySunkReward() {
-	g.gold += enemySunkReward
+func (g *Game) awardEnemySunkReward(reward int) {
+	g.gold += reward
 	if g.onEnemySunk != nil {
 		g.onEnemySunk()
 	}
@@ -1609,6 +1648,8 @@ func shotDamage(load CannonLoad) int {
 		return cannonballDamage
 	case LoadGrapeShot:
 		return grapeShotDamage
+	case LoadDeckGun:
+		return deckGunDamage
 	default:
 		return 0
 	}
@@ -1622,6 +1663,19 @@ func shotIntersectsShip(shot Shot, position Position, heading Heading) bool {
 		}
 	}
 	return shotIntersectsDiagonalShipHitbox(shotCell, position, heading)
+}
+
+func shotIntersectsEnemy(shot Shot, enemy EnemyShip) bool {
+	shotCell := gridCell{x: int(math.Round(shot.Position.X)), y: int(math.Round(shot.Position.Y))}
+	for _, cell := range enemyFootprint(enemy) {
+		if cell == shotCell {
+			return true
+		}
+	}
+	if enemy.Kind == EnemyShipSmall {
+		return false
+	}
+	return shotIntersectsDiagonalShipHitbox(shotCell, enemy.Position, enemy.Heading)
 }
 
 func shotIntersectsDiagonalShipHitbox(shotCell gridCell, position Position, heading Heading) bool {
@@ -1955,6 +2009,16 @@ func (g *Game) shipIntersectsIsland(position Position, heading Heading) bool {
 	return false
 }
 
+func (g *Game) enemyIntersectsIsland(enemy EnemyShip, position Position) bool {
+	enemy.Position = position
+	for _, cell := range enemyFootprint(enemy) {
+		if g.CellIsIsland(cell.x, cell.y) {
+			return true
+		}
+	}
+	return false
+}
+
 func shipIntersectsIslands(position Position, heading Heading, islands []Island) bool {
 	for _, cell := range shipFootprint(position, heading) {
 		for _, island := range islands {
@@ -2146,6 +2210,28 @@ func fallbackPriceDelta(previous int, average int, rng *rand.Rand) int {
 	return 1
 }
 
+func randomEnemyShipKind(rng *rand.Rand) EnemyShipKind {
+	rng = ensureRNG(rng)
+	if rng.Intn(smallEnemySpawnChance) == 0 {
+		return EnemyShipSmall
+	}
+	return EnemyShipRegular
+}
+
+func enemyShipHitPoints(kind EnemyShipKind) int {
+	if kind == EnemyShipSmall {
+		return smallEnemyHitPoints
+	}
+	return shipHitPoints
+}
+
+func enemyShipReward(kind EnemyShipKind) int {
+	if kind == EnemyShipSmall {
+		return smallEnemySunkReward
+	}
+	return enemySunkReward
+}
+
 func ensureRNG(rng *rand.Rand) *rand.Rand {
 	if rng != nil {
 		return rng
@@ -2211,26 +2297,53 @@ func portBounds(port Port, width, height int) gridBounds {
 }
 
 func shipFootprint(position Position, heading Heading) []gridCell {
+	return shipFootprintFromOffsets(position, heading, regularShipFootprintOffsets())
+}
+
+func enemyFootprint(enemy EnemyShip) []gridCell {
+	if enemy.Kind == EnemyShipSmall {
+		return shipFootprintFromOffsets(enemy.Position, enemy.Heading, smallShipFootprintOffsets())
+	}
+	return shipFootprint(enemy.Position, enemy.Heading)
+}
+
+func shipFootprintFromOffsets(position Position, heading Heading, offsets []gridCell) []gridCell {
 	cx := int(math.Round(position.X))
 	cy := int(math.Round(position.Y))
 	dx, dy := headingStep(heading)
 	leftDX, leftDY := dy, -dx
-	cell := func(forward, lateral int) gridCell {
-		return gridCell{
-			x: cx + forward*dx + lateral*leftDX,
-			y: cy + forward*dy + lateral*leftDY,
-		}
+	cells := make([]gridCell, 0, len(offsets))
+	for _, offset := range offsets {
+		cells = append(cells, gridCell{
+			x: cx + offset.x*dx + offset.y*leftDX,
+			y: cy + offset.x*dy + offset.y*leftDY,
+		})
 	}
+	return cells
+}
 
+func regularShipFootprintOffsets() []gridCell {
 	cells := make([]gridCell, 0, 15)
 	for forward := -3; forward <= 3; forward++ {
-		cells = append(cells, cell(forward, 0))
+		cells = append(cells, gridCell{x: forward, y: 0})
 	}
 	for forward := -1; forward <= 1; forward++ {
-		cells = append(cells, cell(forward, -1), cell(forward, 1))
+		cells = append(cells, gridCell{x: forward, y: -1}, gridCell{x: forward, y: 1})
 	}
-	cells = append(cells, cell(0, -2), cell(0, 2))
+	cells = append(cells, gridCell{x: 0, y: -2}, gridCell{x: 0, y: 2})
 	return cells
+}
+
+func smallShipFootprintOffsets() []gridCell {
+	return []gridCell{
+		{x: -2, y: 0},
+		{x: -1, y: 0},
+		{x: 0, y: 0},
+		{x: 1, y: 0},
+		{x: 2, y: 0},
+		{x: 0, y: -1},
+		{x: 0, y: 1},
+	}
 }
 
 func shipsOverlap(a Position, aHeading Heading, b Position, bHeading Heading) bool {
@@ -2240,12 +2353,27 @@ func shipsOverlap(a Position, aHeading Heading, b Position, bHeading Heading) bo
 func shipsTooClose(a Position, aHeading Heading, b Position, bHeading Heading, margin int) bool {
 	for _, aCell := range shipFootprint(a, aHeading) {
 		for _, bCell := range shipFootprint(b, bHeading) {
-			if absInt(aCell.x-bCell.x) <= margin && absInt(aCell.y-bCell.y) <= margin {
+			if cellsWithin(aCell, bCell, margin) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+func enemyShipsTooClose(a EnemyShip, b EnemyShip, margin int) bool {
+	for _, aCell := range enemyFootprint(a) {
+		for _, bCell := range enemyFootprint(b) {
+			if cellsWithin(aCell, bCell, margin) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func cellsWithin(a gridCell, b gridCell, margin int) bool {
+	return absInt(a.x-b.x) <= margin && absInt(a.y-b.y) <= margin
 }
 
 func scaleCoordinate(value float64, oldSize, newSize int) float64 {

@@ -9,21 +9,25 @@ import (
 )
 
 const (
-	waterGlyph      byte = 126
-	mapEdgeGlyph    byte = 37
-	islandGlyph     byte = 43
-	sternGlyph      byte = 66
-	hullGlyph       byte = 79
-	sideGlyph       byte = 61
-	enemyBowGlyph   byte = 65
-	enemySternGlyph byte = 90
-	enemyHullGlyph  byte = 120
-	enemySideGlyph  byte = 45
-	cannonballGlyph byte = 64
-	grapeShotGlyph  byte = 42
-	aimLineGlyph    byte = 46
-	statusRows      int  = 3
-	ansiReset            = "\x1b[0m"
+	waterGlyph           byte = 126
+	mapEdgeGlyph         byte = 37
+	islandGlyph          byte = 43
+	sternGlyph           byte = 66
+	hullGlyph            byte = 79
+	sideGlyph            byte = 61
+	enemyBowGlyph        byte = 65
+	enemySternGlyph      byte = 90
+	enemyHullGlyph       byte = 120
+	enemySideGlyph       byte = 45
+	smallEnemyBowGlyph   byte = 97
+	smallEnemyGunGlyph   byte = 33
+	smallEnemyHullGlyph  byte = 111
+	smallEnemySternGlyph byte = 122
+	cannonballGlyph      byte = 64
+	grapeShotGlyph       byte = 42
+	aimLineGlyph         byte = 46
+	statusRows           int  = 3
+	ansiReset                 = "\x1b[0m"
 )
 
 type cellStyle int
@@ -82,7 +86,7 @@ func Render(g *game.Game, width, height int) string {
 		drawPort(rows, styles, cam, port)
 	}
 	for _, enemy := range g.Enemies() {
-		drawEnemyShip(rows, styles, cam, enemy.Position, enemy.Heading)
+		drawEnemyShip(rows, styles, cam, enemy)
 	}
 	drawShots(rows, styles, cam, g.Shots())
 	drawShip(rows, styles, cam, g.Ship(), g.Heading())
@@ -254,13 +258,35 @@ func drawShip(rows [][]byte, styles [][]cellStyle, cam camera, position game.Pos
 	})
 }
 
-func drawEnemyShip(rows [][]byte, styles [][]cellStyle, cam camera, position game.Position, heading game.Heading) {
-	drawShipShape(rows, styles, cam, position, heading, styleEnemyShip, shipGlyphs{
+func drawEnemyShip(rows [][]byte, styles [][]cellStyle, cam camera, enemy game.EnemyShip) {
+	if enemy.Kind == game.EnemyShipSmall {
+		drawSmallEnemyShip(rows, styles, cam, enemy.Position, enemy.Heading)
+		return
+	}
+	drawShipShape(rows, styles, cam, enemy.Position, enemy.Heading, styleEnemyShip, shipGlyphs{
 		stern: enemySternGlyph,
 		hull:  enemyHullGlyph,
 		bow:   enemyBowGlyph,
 		side:  enemySideGlyph,
 	})
+}
+
+func drawSmallEnemyShip(rows [][]byte, styles [][]cellStyle, cam camera, position game.Position, heading game.Heading) {
+	cx := int(math.Round(position.X)) - cam.x
+	cy := int(math.Round(position.Y)) - cam.y
+	dx, dy := headingCellVector(heading)
+	leftDX, leftDY := leftCellVector(heading)
+	set := func(forward, lateral int, glyph byte) {
+		setCell(rows, styles, cx+forward*dx+lateral*leftDX, cy+forward*dy+lateral*leftDY, glyph, styleEnemyShip)
+	}
+
+	set(-2, 0, smallEnemySternGlyph)
+	set(-1, 0, smallEnemyHullGlyph)
+	set(0, -1, enemySideGlyph)
+	set(0, 0, smallEnemyHullGlyph)
+	set(0, 1, enemySideGlyph)
+	set(1, 0, smallEnemyGunGlyph)
+	set(2, 0, smallEnemyBowGlyph)
 }
 
 func drawShipShape(rows [][]byte, styles [][]cellStyle, cam camera, position game.Position, heading game.Heading, style cellStyle, glyphs shipGlyphs) {
