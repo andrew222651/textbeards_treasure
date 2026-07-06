@@ -11,7 +11,7 @@ import (
 )
 
 func TestOneShotSoundsAreEmbedded(t *testing.T) {
-	for _, asset := range []string{cannonFireAsset, repairAsset, tradeAsset, splashAsset} {
+	for _, asset := range []string{cannonFireAsset, repairAsset, tradeAsset, hitAsset, splashAsset} {
 		data, err := embeddedAssets.ReadFile(asset)
 		if err != nil {
 			t.Fatalf("expected embedded one-shot sound %s: %v", asset, err)
@@ -94,6 +94,31 @@ func TestTradePlayerPreparesTemporarySoundFile(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected temp trade sound file to be removed, stat err=%v", err)
+	}
+}
+
+func TestHitPlayerPreparesTemporarySoundFile(t *testing.T) {
+	player := NewHitPlayer()
+	path, ok := player.soundPath()
+	if !ok {
+		t.Fatal("expected hit sound path to be prepared")
+	}
+	if filepath.Ext(path) != ".wav" {
+		t.Fatalf("expected .wav temp file, got %q", path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("expected temp hit sound file to be readable: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("expected temp hit sound file to be non-empty")
+	}
+
+	if err := player.Close(); err != nil {
+		t.Fatalf("expected close to remove temp file: %v", err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected temp hit sound file to be removed, stat err=%v", err)
 	}
 }
 

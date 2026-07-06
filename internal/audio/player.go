@@ -14,13 +14,14 @@ const (
 	cannonFireAsset       = "assets/cannon_fire.ogg"
 	repairAsset           = "assets/craft.ogg"
 	tradeAsset            = "assets/gold_sack.wav"
+	hitAsset              = "assets/hit.wav"
 	splashAsset           = "assets/splash.ogg"
 	defaultMusicAsset     = "assets/default_music.wav"
 	tavernMusicAsset      = "assets/tavern.ogg"
 	musicCrossfadeOverlap = 500 * time.Millisecond
 )
 
-//go:embed assets/cannon_fire.ogg assets/craft.ogg assets/gold_sack.wav assets/splash.ogg assets/default_music.wav assets/tavern.ogg
+//go:embed assets/cannon_fire.ogg assets/craft.ogg assets/gold_sack.wav assets/hit.wav assets/splash.ogg assets/default_music.wav assets/tavern.ogg
 var embeddedAssets embed.FS
 
 type playerCommand struct {
@@ -255,6 +256,82 @@ func (p *TradePlayer) soundPath() (string, bool) {
 }
 
 func (p *TradePlayer) playCommand() (playerCommand, bool) {
+	p.commandOnce.Do(func() {
+		for _, command := range cannonFireCommands() {
+			if _, err := exec.LookPath(command.name); err == nil {
+				selected := command
+				p.command = &selected
+				return
+			}
+		}
+	})
+	if p.command == nil {
+		return playerCommand{}, false
+	}
+	return *p.command, true
+}
+
+// HitPlayer plays the embedded ship-hit sound through the first available local
+// audio command. Missing audio tools are treated as a silent no-op.
+type HitPlayer struct {
+	prepareOnce sync.Once
+	commandOnce sync.Once
+	path        string
+	prepareErr  error
+	command     *playerCommand
+	muted       func() bool
+}
+
+func NewHitPlayer() *HitPlayer {
+	return &HitPlayer{}
+}
+
+func (p *HitPlayer) Play() {
+	if p == nil || p.isMuted() {
+		return
+	}
+	path, ok := p.soundPath()
+	if !ok {
+		return
+	}
+	command, ok := p.playCommand()
+	if !ok {
+		return
+	}
+
+	cmd := exec.Command(command.name, command.argsFor(path, 0)...)
+	if err := cmd.Start(); err != nil {
+		return
+	}
+	go func() { _ = cmd.Wait() }()
+}
+
+func (p *HitPlayer) SetMutedFunc(muted func() bool) {
+	if p == nil {
+		return
+	}
+	p.muted = muted
+}
+
+func (p *HitPlayer) isMuted() bool {
+	return p.muted != nil && p.muted()
+}
+
+func (p *HitPlayer) Close() error {
+	if p == nil || p.path == "" {
+		return nil
+	}
+	return os.Remove(p.path)
+}
+
+func (p *HitPlayer) soundPath() (string, bool) {
+	p.prepareOnce.Do(func() {
+		p.path, p.prepareErr = writeEmbeddedAsset(hitAsset, "pirates-hit-*.wav")
+	})
+	return p.path, p.prepareErr == nil && p.path != ""
+}
+
+func (p *HitPlayer) playCommand() (playerCommand, bool) {
 	p.commandOnce.Do(func() {
 		for _, command := range cannonFireCommands() {
 			if _, err := exec.LookPath(command.name); err == nil {

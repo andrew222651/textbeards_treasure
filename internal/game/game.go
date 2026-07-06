@@ -181,6 +181,7 @@ type Config struct {
 	HighScore          int
 	OnMove             func(Position)
 	OnCannonFire       func()
+	OnShipHit          func()
 	OnEnemySunk        func()
 	OnTrade            func()
 	OnRepair           func()
@@ -258,6 +259,7 @@ type Game struct {
 	tradeQuantity               int
 	onMove                      func(Position)
 	onCannonFire                func()
+	onShipHit                   func()
 	onEnemySunk                 func()
 	muted                       bool
 	onTrade                     func()
@@ -374,6 +376,7 @@ func New(config Config) *Game {
 		tradeQuantity:     1,
 		onMove:            config.OnMove,
 		onCannonFire:      config.OnCannonFire,
+		onShipHit:         config.OnShipHit,
 		onEnemySunk:       config.OnEnemySunk,
 		onTrade:           config.OnTrade,
 		onRepair:          config.OnRepair,
@@ -1490,6 +1493,7 @@ func (g *Game) applyEnemyShotHit(shot Shot) bool {
 
 func (g *Game) applyPrimaryEnemyDamage(load CannonLoad) {
 	g.enemy.hitPoints -= shotDamage(load)
+	g.notifyShipHit()
 	if g.enemy.hitPoints <= 0 {
 		g.enemyDestroyed = true
 		g.awardEnemySunkReward()
@@ -1501,9 +1505,16 @@ func (g *Game) applySpawnedEnemyDamage(index int, load CannonLoad) {
 		return
 	}
 	g.spawnedEnemies[index].hitPoints -= shotDamage(load)
+	g.notifyShipHit()
 	if g.spawnedEnemies[index].hitPoints <= 0 {
 		g.removeSpawnedEnemy(index)
 		g.awardEnemySunkReward()
+	}
+}
+
+func (g *Game) notifyShipHit() {
+	if g.onShipHit != nil {
+		g.onShipHit()
 	}
 }
 
@@ -1525,6 +1536,7 @@ func (g *Game) applyPlayerShotHit(shot Shot) bool {
 	}
 
 	g.playerHitPoints -= shotDamage(shot.Load)
+	g.notifyShipHit()
 	if g.playerHitPoints <= 0 {
 		g.gameOver = true
 	}

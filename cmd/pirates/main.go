@@ -37,6 +37,9 @@ func main() {
 	tradeSound := audio.NewTradePlayer()
 	defer tradeSound.Close()
 	config.OnTrade = tradeSound.Play
+	hitSound := audio.NewHitPlayer()
+	defer hitSound.Close()
+	config.OnShipHit = hitSound.Play
 	splashSound := audio.NewSplashPlayer()
 	defer splashSound.Close()
 	config.OnEnemySunk = splashSound.Play
@@ -45,6 +48,7 @@ func main() {
 	sound.SetMutedFunc(mute.Muted)
 	repairSound.SetMutedFunc(mute.Muted)
 	tradeSound.SetMutedFunc(mute.Muted)
+	hitSound.SetMutedFunc(mute.Muted)
 	splashSound.SetMutedFunc(mute.Muted)
 	config.OnMuteChange = mute.SetMuted
 	music.Start()

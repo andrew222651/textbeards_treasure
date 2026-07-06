@@ -1643,6 +1643,46 @@ func TestCannonballHitDamagesEnemyForTwoHitPoints(t *testing.T) {
 	}
 }
 
+func TestShipHitCallbackRunsForPrimaryEnemyHits(t *testing.T) {
+	hits := 0
+	g := New(Config{Width: 40, Height: 20, OnShipHit: func() { hits++ }})
+
+	hitPrimaryEnemy(g, LoadCannonballs)
+	if hits != 1 {
+		t.Fatalf("expected enemy hit callback once, got %d", hits)
+	}
+
+	hitPrimaryEnemy(g, LoadCannonballs)
+	hitPrimaryEnemy(g, LoadGrapeShot)
+	if hits != 3 {
+		t.Fatalf("expected enemy hit callback for each hit including sinking hit, got %d", hits)
+	}
+}
+
+func TestShipHitCallbackRunsForSpawnedEnemyHits(t *testing.T) {
+	hits := 0
+	g := New(Config{Width: 80, Height: 40, OnShipHit: func() { hits++ }})
+	g.enemyDestroyed = true
+	g.spawnedEnemies = []EnemyShip{{Position: Position{X: 20, Y: 20}, Heading: HeadingN, hitPoints: shipHitPoints}}
+
+	g.shots = []Shot{{Position: g.spawnedEnemies[0].Position, Load: LoadCannonballs}}
+	g.Update(time.Nanosecond)
+
+	if hits != 1 {
+		t.Fatalf("expected spawned enemy hit callback once, got %d", hits)
+	}
+}
+
+func TestShipHitCallbackRunsForPlayerHits(t *testing.T) {
+	hits := 0
+	g := New(Config{Width: 80, Height: 40, OnShipHit: func() { hits++ }})
+
+	hitPlayer(g, LoadCannonballs)
+	if hits != 1 {
+		t.Fatalf("expected player hit callback once, got %d", hits)
+	}
+}
+
 func TestEnemyIsDestroyedAfterFiveDamage(t *testing.T) {
 	sunk := 0
 	g := New(Config{Width: 40, Height: 20, OnEnemySunk: func() { sunk++ }})
