@@ -5,10 +5,10 @@ import (
 	"os"
 	"time"
 
-	"pirates/internal/audio"
-	"pirates/internal/game"
-	"pirates/internal/score"
-	"pirates/internal/tui"
+	"textbeards_treasure/internal/audio"
+	"textbeards_treasure/internal/game"
+	"textbeards_treasure/internal/score"
+	"textbeards_treasure/internal/tui"
 )
 
 func main() {
@@ -82,7 +82,7 @@ func configureScores(config *game.Config) (*score.Store, error) {
 }
 
 func configureTelemetry(config *game.Config) (func() error, error) {
-	path := os.Getenv("PIRATES_POSITION_LOG")
+	path := os.Getenv("TEXTBEARDS_TREASURE_POSITION_LOG")
 	if path == "" {
 		return nil, nil
 	}

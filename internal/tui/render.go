@@ -5,7 +5,7 @@ import (
 	"math"
 	"strings"
 
-	"pirates/internal/game"
+	"textbeards_treasure/internal/game"
 )
 
 const (
@@ -76,8 +76,8 @@ func Render(g *game.Game, width, height int) string {
 	}
 
 	drawAimLines(rows, styles, cam, g.AimLines())
-	drawMapEdges(rows, styles, cam, g.Width(), g.Height())
 	drawIslands(rows, styles, cam, g)
+	drawMapEdges(rows, styles, cam, g.Width(), g.Height())
 	for _, port := range g.Ports() {
 		drawPort(rows, styles, cam, port)
 	}
@@ -169,14 +169,14 @@ func drawGameOver(rows [][]byte, styles [][]cellStyle) {
 	drawText(rows, styles, x, y, message, styleGameOver)
 }
 
-func portMenuTitle(port game.Port, upgradeCost int) string {
+func portMenuTitle(port game.Port) string {
 	if port.UpgradePurchased {
 		return port.Name + " Market  Upgrade sold"
 	}
 	if port.Upgrade == game.UpgradeNone {
 		return port.Name + " Market  No upgrade"
 	}
-	return fmt.Sprintf("%s Market  U %s %dg", port.Name, game.UpgradeName(port.Upgrade), upgradeCost)
+	return fmt.Sprintf("%s Market  U %s %dg", port.Name, game.UpgradeName(port.Upgrade), port.UpgradePrice)
 }
 
 func drawPortMenu(rows [][]byte, styles [][]cellStyle, g *game.Game) {
@@ -185,7 +185,7 @@ func drawPortMenu(rows [][]byte, styles [][]cellStyle, g *game.Game) {
 		return
 	}
 	lines := []string{
-		portMenuTitle(port, g.UpgradeCost()),
+		portMenuTitle(port),
 		fmt.Sprintf("Gold %d  HP %d/%d  Cargo %d/%d  Qty %d  Repair %dg", g.Gold(), g.PlayerHitPoints(), g.MaxShipHitPoints(), g.CargoUsed(), g.CargoCapacity(), g.TradeQuantity(), g.RepairFee()),
 	}
 	for i, good := range game.Goods() {

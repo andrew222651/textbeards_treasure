@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"pirates/internal/game"
+	"textbeards_treasure/internal/game"
 )
 
 func TestLegacyControlPressNudgesWithoutStayingHeld(t *testing.T) {
@@ -105,7 +105,7 @@ func TestRepeatInputsDoNotAccelerateHeldControls(t *testing.T) {
 }
 
 func TestLoadSelectionAndFireEvents(t *testing.T) {
-	g := game.New(game.Config{Width: 20, Height: 20})
+	g := game.New(game.Config{Width: 40, Height: 40})
 
 	handleEvent(g, Event{Type: EventLoadSelect, Load: KeyGrapeShot})
 	if got := g.CannonLoad(); got != game.LoadGrapeShot {

@@ -1,4 +1,4 @@
-# Textbeard's Treasure
+# Textbeards Treasure
 
 A Golang TUI game.
 
@@ -27,14 +27,15 @@ Music by Matthew Pablo
 ## Run the program
 
 ```sh
-go run ./cmd/pirates
+go run ./cmd/textbeards_treasure
 ```
 
 Press `Esc` or `Ctrl-C` to quit. When the game ends, the current gold count is
 saved as the high score if it is a new record.
 
-High scores are stored in a SQLite database at `PIRATES_SCORE_DB` when that
-environment variable is set, or in the user's config directory by default.
+High scores are stored in a SQLite database at `TEXTBEARDS_TREASURE_SCORE_DB` when that
+environment variable is set, or at `textbeards_treasure/high_scores.sqlite` under
+the user's config directory by default.
 
 Music playback is best-effort through the first available seek-capable local
 audio command: `ffplay`, `mpv`, or `play`. Cannon fire, trade, and repair

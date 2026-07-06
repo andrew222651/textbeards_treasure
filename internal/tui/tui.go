@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"pirates/internal/game"
+	"textbeards_treasure/internal/game"
 )
 
 const (

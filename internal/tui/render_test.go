@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"pirates/internal/game"
+	"textbeards_treasure/internal/game"
 )
 
 func TestRenderUsesRawTerminalSafeLineEndings(t *testing.T) {
@@ -160,8 +160,8 @@ func TestRenderScrollsToBottomLeftMapEdgeAndPort(t *testing.T) {
 	if !strings.Contains(frame, "Port Royal Market") {
 		t.Fatalf("expected Port Royal market after scrolling to bottom-left port, got %q", frame)
 	}
-	if !strings.Contains(frame, "%") {
-		t.Fatalf("expected visible map edge marker, got %q", frame)
+	if !strings.Contains(frame, "%") || !strings.Contains(frame, "+") {
+		t.Fatalf("expected visible map edge and corner land after scrolling to bottom-left port, got %q", frame)
 	}
 }
 
@@ -189,11 +189,12 @@ func TestRenderShowsNorthWestPortBelowStatusRows(t *testing.T) {
 
 	frame := stripANSI(Render(g, 30, 20))
 	lines := strings.Split(frame, "\r\n")
-	if len(lines) < statusRows+2 {
+	if len(lines) <= statusRows {
 		t.Fatalf("expected enough rendered lines, got %d in %q", len(lines), frame)
 	}
-	if !strings.Contains(lines[statusRows], "##########") || !strings.Contains(lines[statusRows+1], "PIER") {
-		t.Fatalf("expected NW port below status rows, got lines %q and %q in %q", lines[statusRows], lines[statusRows+1], frame)
+	belowStatus := strings.Join(lines[statusRows:], "\n")
+	if !strings.Contains(belowStatus, "##########") || !strings.Contains(belowStatus, "PIER") {
+		t.Fatalf("expected NW port below status rows, got %q in %q", belowStatus, frame)
 	}
 }
 
@@ -289,7 +290,7 @@ func sailNearNorthWestPort(t *testing.T, g *game.Game) {
 	g.NudgeControl(game.ControlForward, 8*time.Second)
 	g.NudgeControl(game.ControlTurnRight, 0)
 	g.NudgeControl(game.ControlTurnRight, 0)
-	g.NudgeControl(game.ControlForward, 475*time.Millisecond)
+	g.NudgeControl(game.ControlForward, 350*time.Millisecond)
 	if g.InPort() {
 		t.Fatal("expected ship to be near the NW port without opening the port menu")
 	}

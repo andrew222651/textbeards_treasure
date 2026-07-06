@@ -5,6 +5,35 @@ import (
 	"testing"
 )
 
+func TestDefaultDatabasePathUsesEnvOverride(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "scores.sqlite")
+	t.Setenv(EnvDatabasePath, path)
+
+	got, err := DefaultDatabasePath()
+	if err != nil {
+		t.Fatalf("default database path: %v", err)
+	}
+	if got != path {
+		t.Fatalf("expected env database path %q, got %q", path, got)
+	}
+}
+
+func TestDefaultDatabasePathUsesTextbeardsTreasureConfigDir(t *testing.T) {
+	configDir := t.TempDir()
+	t.Setenv(EnvDatabasePath, "")
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+
+	got, err := DefaultDatabasePath()
+	if err != nil {
+		t.Fatalf("default database path: %v", err)
+	}
+
+	want := filepath.Join(configDir, "textbeards_treasure", "high_scores.sqlite")
+	if got != want {
+		t.Fatalf("expected default database path %q, got %q", want, got)
+	}
+}
+
 func TestStoreStartsWithNoHighScore(t *testing.T) {
 	store := openTestStore(t)
 	defer store.Close()

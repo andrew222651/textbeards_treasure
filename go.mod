@@ -1,4 +1,4 @@
-module pirates
+module textbeards_treasure
 
 go 1.24.0
 

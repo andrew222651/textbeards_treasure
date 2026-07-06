@@ -7,33 +7,35 @@ import (
 )
 
 const (
-	defaultWidth              = 240
-	defaultHeight             = 144
-	defaultShipSpeed          = 18.0
-	defaultShotSpeed          = 32.0
-	defaultCannonCooldown     = 3 * time.Second
-	defaultTurnInterval       = 140 * time.Millisecond
-	defaultCannonRange        = 0.9
-	defaultEnemySpawnInterval = 12 * time.Second
-	defaultEnemyDensityCells  = 2400
-	defaultEnemyShipSpeed     = 3.0
-	enemySpawnClearance       = 8
-	defaultGold               = 100
-	shipHitPoints             = 5
-	cannonballDamage          = 2
-	grapeShotDamage           = 1
-	shipRepairFee             = 25
-	enemySunkReward           = 50
-	defaultCargoCapacity      = 10
-	upgradeCost               = 1000
-	hullUpgradeHitPoints      = 2
-	cargoUpgradeCapacity      = 5
-	cooldownUpgradeReduction  = time.Second
-	minimumCannonCooldown     = time.Second
-	portWidth                 = 10
-	portHeight                = 3
-	shipMargin                = 3.0
-	maxDefaultEnemyRange      = 24.0
+	defaultWidth                  = 240
+	defaultHeight                 = 144
+	defaultShipSpeed              = 18.0
+	defaultShotSpeed              = 32.0
+	defaultCannonCooldown         = 3 * time.Second
+	defaultTurnInterval           = 140 * time.Millisecond
+	defaultCannonRange            = 0.9
+	defaultEnemySpawnInterval     = 12 * time.Second
+	defaultEnemyDensityCells      = 2400
+	defaultEnemyShipSpeed         = 3.0
+	maxEnemyDifficultyMultiplier  = 3.0
+	enemyDifficultyPurchaseMargin = 1.1
+	enemySpawnClearance           = 8
+	defaultGold                   = 100
+	shipHitPoints                 = 5
+	cannonballDamage              = 2
+	grapeShotDamage               = 1
+	shipRepairFee                 = 25
+	enemySunkReward               = 50
+	defaultCargoCapacity          = 10
+	upgradeCost                   = 1000
+	hullUpgradeHitPoints          = 2
+	cargoUpgradeCapacity          = 5
+	cooldownUpgradeReduction      = time.Second
+	minimumCannonCooldown         = time.Second
+	portWidth                     = 10
+	portHeight                    = 3
+	shipMargin                    = 3.0
+	maxDefaultEnemyRange          = 24.0
 )
 
 type Heading int
@@ -129,6 +131,7 @@ type Port struct {
 	Position         Position
 	Prices           [goodCount]int
 	Upgrade          UpgradeKind
+	UpgradePrice     int
 	UpgradePurchased bool
 	Corner           MapCorner
 	OnIsland         bool
@@ -250,6 +253,8 @@ type Game struct {
 	dockedPort                  int
 	priceRNG                    *rand.Rand
 	gold                        int
+	nonGoodPurchaseValue        int
+	totalNonGoodPurchaseValue   int
 	highScore                   int
 	scoreFinalized              bool
 	inventory                   [goodCount]int
@@ -354,18 +359,20 @@ func New(config Config) *Game {
 		maxShipHitPoints: shipHitPoints,
 		ports: []Port{
 			{
-				Name:     "Port Royal",
-				Position: cornerPortPosition(corners[0], config.Width, config.Height),
-				Prices:   portRoyalPrices,
-				Upgrade:  portUpgrades[0],
-				Corner:   corners[0],
+				Name:         "Port Royal",
+				Position:     cornerPortPosition(corners[0], config.Width, config.Height),
+				Prices:       portRoyalPrices,
+				Upgrade:      portUpgrades[0],
+				UpgradePrice: upgradePrice(portUpgrades[0]),
+				Corner:       corners[0],
 			},
 			{
-				Name:     "Havana",
-				Position: cornerPortPosition(corners[1], config.Width, config.Height),
-				Prices:   havanaPrices,
-				Upgrade:  portUpgrades[1],
-				Corner:   corners[1],
+				Name:         "Havana",
+				Position:     cornerPortPosition(corners[1], config.Width, config.Height),
+				Prices:       havanaPrices,
+				Upgrade:      portUpgrades[1],
+				UpgradePrice: upgradePrice(portUpgrades[1]),
+				Corner:       corners[1],
 			},
 		},
 		islands:           islands,
@@ -386,13 +393,15 @@ func New(config Config) *Game {
 	}
 	if len(islands) > 0 {
 		g.ports = append(g.ports, Port{
-			Name:     "Tortuga",
-			Position: islandPortPosition(islands[0], config.Width, config.Height),
-			Prices:   tortugaPrices,
-			Upgrade:  portUpgrades[2],
-			OnIsland: true,
+			Name:         "Tortuga",
+			Position:     islandPortPosition(islands[0], config.Width, config.Height),
+			Prices:       tortugaPrices,
+			Upgrade:      portUpgrades[2],
+			UpgradePrice: upgradePrice(portUpgrades[2]),
+			OnIsland:     true,
 		})
 	}
+	g.totalNonGoodPurchaseValue = totalNonGoodPurchaseValue(g.ports)
 	g.clampShip()
 	return g
 }
@@ -604,6 +613,9 @@ func (g *Game) Islands() []Island {
 }
 
 func (g *Game) CellIsIsland(x, y int) bool {
+	if cornerLandContains(x, y, g.width, g.height) {
+		return true
+	}
 	for _, island := range g.islands {
 		if island.ContainsCell(x, y) {
 			return true
@@ -645,6 +657,10 @@ func (g *Game) shipTouchesPort(port Port) bool {
 
 func (g *Game) Gold() int {
 	return g.gold
+}
+
+func (g *Game) Points() int {
+	return g.gold + g.nonGoodPurchaseValue
 }
 
 func (g *Game) AddGold(amount int) {
@@ -689,6 +705,9 @@ func (g *Game) CargoCapacity() int {
 }
 
 func (g *Game) UpgradeCost() int {
+	if port, ok := g.CurrentPort(); ok && port.UpgradePrice > 0 {
+		return port.UpgradePrice
+	}
 	return upgradeCost
 }
 
@@ -770,19 +789,21 @@ func (g *Game) RepairShip() int {
 
 func (g *Game) BuyPortUpgrade() int {
 	portIndex := g.currentPortIndex()
-	if g.gameOver || portIndex < 0 || g.gold < upgradeCost {
+	if g.gameOver || portIndex < 0 {
 		return 0
 	}
 
 	port := &g.ports[portIndex]
-	if port.UpgradePurchased || !validUpgrade(port.Upgrade) {
+	if port.UpgradePurchased || !validUpgrade(port.Upgrade) || port.UpgradePrice <= 0 || g.gold < port.UpgradePrice {
 		return 0
 	}
 
-	g.gold -= upgradeCost
+	paid := port.UpgradePrice
+	g.gold -= paid
+	g.nonGoodPurchaseValue += paid
 	g.applyUpgrade(port.Upgrade)
 	port.UpgradePurchased = true
-	return upgradeCost
+	return paid
 }
 
 func (g *Game) applyUpgrade(upgrade UpgradeKind) {
@@ -1080,7 +1101,8 @@ func (g *Game) updateEnemyShipAI(enemy *EnemyShip, turnElapsed *time.Duration, c
 }
 
 func (g *Game) enemyCanEngage(position Position) bool {
-	return !g.InPort() && g.enemyAggroRange > 0 && g.enemyDistanceToPlayer(position) <= g.enemyAggroRange
+	aggroRange := g.currentEnemyAggroRange()
+	return !g.InPort() && aggroRange > 0 && g.enemyDistanceToPlayer(position) <= aggroRange
 }
 
 func (g *Game) enemyNeedsToClose(position Position) bool {
@@ -1102,14 +1124,19 @@ func (g *Game) rotateEnemyToward(enemy *EnemyShip, turnElapsed *time.Duration, t
 }
 
 func (g *Game) enemyCannonLoadForTarget(position Position, baseLoad CannonLoad) CannonLoad {
-	grapeRange := g.enemyAggroRange / 3
-	if grapeRange < 1 {
-		grapeRange = 1
-	}
+	grapeRange := g.enemyGrapeShotRange()
 	if g.enemyDistanceToPlayer(position) <= grapeRange {
 		return LoadGrapeShot
 	}
 	return baseLoad
+}
+
+func (g *Game) enemyGrapeShotRange() float64 {
+	grapeRange := g.enemyAggroRange / 3
+	if grapeRange < 1 {
+		return 1
+	}
+	return grapeRange
 }
 
 func (g *Game) enemyDistanceToPlayer(position Position) float64 {
@@ -1301,10 +1328,43 @@ func (g *Game) enemyCount() int {
 }
 
 func (g *Game) maxEnemyShips() int {
-	if g.enemyDensityCells <= 0 {
+	densityCells := g.currentEnemyDensityCells()
+	if densityCells <= 0 {
 		return 1
 	}
-	return maxInt(1, g.width*g.height/g.enemyDensityCells)
+	return maxInt(1, g.width*g.height/densityCells)
+}
+
+func (g *Game) currentEnemyAggroRange() float64 {
+	return g.enemyAggroRange * g.enemyDifficultyMultiplier()
+}
+
+func (g *Game) currentEnemyDensityCells() int {
+	if g.enemyDensityCells <= 0 {
+		return 0
+	}
+	return maxInt(1, int(math.Floor(float64(g.enemyDensityCells)/g.enemyDifficultyMultiplier())))
+}
+
+func (g *Game) enemyDifficultyMultiplier() float64 {
+	progress := g.enemyDifficultyProgress()
+	return 1 + progress*(maxEnemyDifficultyMultiplier-1)
+}
+
+func (g *Game) enemyDifficultyProgress() float64 {
+	maxPoints := g.enemyDifficultyMaxPoints()
+	if maxPoints <= defaultGold {
+		return 1
+	}
+	progress := float64(g.Points()-defaultGold) / float64(maxPoints-defaultGold)
+	return clamp(progress, 0, 1)
+}
+
+func (g *Game) enemyDifficultyMaxPoints() int {
+	if g.totalNonGoodPurchaseValue <= 0 {
+		return defaultGold
+	}
+	return maxInt(defaultGold+1, int(math.Ceil(float64(g.totalNonGoodPurchaseValue)*enemyDifficultyPurchaseMargin)))
 }
 
 func (g *Game) updatePortVisit() {
@@ -1761,18 +1821,74 @@ func (g *Game) positionPorts() {
 }
 
 func cornerPortPosition(corner MapCorner, width, height int) Position {
+	landHeight := cornerLandHeight(height)
+	eastX := maxInt(0, width-portWidth)
+	northY := clampInt(landHeight-1, 0, maxInt(0, height-portHeight))
+	southY := clampInt(height-landHeight-portHeight+1, 0, maxInt(0, height-portHeight))
+
 	switch corner {
 	case CornerNW:
-		return Position{X: 0, Y: 0}
+		return Position{X: 0, Y: float64(northY)}
 	case CornerNE:
-		return Position{X: float64(maxInt(0, width-portWidth)), Y: 0}
+		return Position{X: float64(eastX), Y: float64(northY)}
 	case CornerSE:
-		return Position{X: float64(maxInt(0, width-portWidth)), Y: float64(maxInt(0, height-portHeight))}
+		return Position{X: float64(eastX), Y: float64(southY)}
 	case CornerSW:
-		return Position{X: 0, Y: float64(maxInt(0, height-portHeight))}
+		return Position{X: 0, Y: float64(southY)}
 	default:
-		return Position{X: 0, Y: 0}
+		return Position{X: 0, Y: float64(northY)}
 	}
+}
+
+func cornerLandContains(x, y int, width, height int) bool {
+	if x < 0 || y < 0 || x >= width || y >= height {
+		return false
+	}
+	landWidth := cornerLandWidth(width)
+	landHeight := cornerLandHeight(height)
+	if landWidth <= 0 || landHeight <= 0 {
+		return false
+	}
+
+	for _, corner := range []MapCorner{CornerNW, CornerNE, CornerSE, CornerSW} {
+		if pointInCornerLand(x, y, width, height, landWidth, landHeight, corner) {
+			return true
+		}
+	}
+	return false
+}
+
+func pointInCornerLand(x, y int, width, height int, landWidth, landHeight int, corner MapCorner) bool {
+	localX := x
+	localY := y
+	if corner == CornerNE || corner == CornerSE {
+		localX = width - 1 - x
+	}
+	if corner == CornerSW || corner == CornerSE {
+		localY = height - 1 - y
+	}
+	if localX < 0 || localY < 0 || localX >= landWidth || localY >= landHeight {
+		return false
+	}
+
+	nx := float64(localX) / float64(maxInt(1, landWidth-1))
+	ny := float64(localY) / float64(maxInt(1, landHeight-1))
+	shore := 1.0 + 0.18*math.Sin(float64(localX)*1.7+float64(localY)*0.4+float64(corner)) + 0.12*math.Cos(float64(localX-localY)*0.9+float64(corner)*0.7)
+	return nx*nx+ny*ny <= shore
+}
+
+func cornerLandWidth(width int) int {
+	if width <= 0 {
+		return 0
+	}
+	return clampInt(width/8, 4, minInt(width, 18))
+}
+
+func cornerLandHeight(height int) int {
+	if height <= 0 {
+		return 0
+	}
+	return clampInt(height/8, 3, minInt(height, 8))
 }
 
 func islandPortPosition(island Island, width, height int) Position {
@@ -1831,7 +1947,12 @@ func shipMarginInt() int {
 }
 
 func (g *Game) shipIntersectsIsland(position Position, heading Heading) bool {
-	return shipIntersectsIslands(position, heading, g.islands)
+	for _, cell := range shipFootprint(position, heading) {
+		if g.CellIsIsland(cell.x, cell.y) {
+			return true
+		}
+	}
+	return false
 }
 
 func shipIntersectsIslands(position Position, heading Heading, islands []Island) bool {
@@ -1891,6 +2012,23 @@ func configuredPortCorners(configured []MapCorner, rng *rand.Rand) [2]MapCorner 
 
 func validMapCorner(corner MapCorner) bool {
 	return corner == CornerNW || corner == CornerNE || corner == CornerSE || corner == CornerSW
+}
+
+func upgradePrice(upgrade UpgradeKind) int {
+	if !validUpgrade(upgrade) {
+		return 0
+	}
+	return upgradeCost
+}
+
+func totalNonGoodPurchaseValue(ports []Port) int {
+	total := 0
+	for _, port := range ports {
+		if validUpgrade(port.Upgrade) && port.UpgradePrice > 0 {
+			total += port.UpgradePrice
+		}
+	}
+	return total
 }
 
 func configuredPortUpgrades(portNames []string, configured map[string]UpgradeKind, rng *rand.Rand) []UpgradeKind {

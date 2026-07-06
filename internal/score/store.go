@@ -11,7 +11,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const EnvDatabasePath = "PIRATES_SCORE_DB"
+const EnvDatabasePath = "TEXTBEARDS_TREASURE_SCORE_DB"
 
 type Store struct {
 	db *sql.DB
@@ -26,7 +26,7 @@ func DefaultDatabasePath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("find user config directory: %w", err)
 	}
-	return filepath.Join(dir, "pirates", "high_scores.sqlite"), nil
+	return filepath.Join(dir, "textbeards_treasure", "high_scores.sqlite"), nil
 }
 
 func OpenDefault() (*Store, error) {

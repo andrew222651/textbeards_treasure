@@ -164,7 +164,7 @@ func TestMuteControllerSuppressesOneShotSounds(t *testing.T) {
 	mute.SetMuted(false)
 	player.Play()
 	waitForRecordedCalls(t, callsPath, func(calls string) bool {
-		return strings.Contains(calls, "pirates-trade-")
+		return strings.Contains(calls, "textbeards-treasure-trade-")
 	})
 }
 
@@ -232,7 +232,7 @@ func TestMusicPlayerLoopsPlaybackCommandUntilStopped(t *testing.T) {
 	defer player.Stop()
 
 	waitForRecordedCalls(t, callsPath, func(calls string) bool {
-		return strings.Count(calls, "pirates-default-music-") >= 2
+		return strings.Count(calls, "textbeards-treasure-default-music-") >= 2
 	})
 	player.Stop()
 	if _, err := os.Stat(player.paths[defaultMusicTrack]); !errors.Is(err, os.ErrNotExist) {
@@ -248,7 +248,7 @@ func TestMuteControllerPausesAndResumesMusic(t *testing.T) {
 	player.Start()
 	defer player.Stop()
 	waitForRecordedCalls(t, callsPath, func(calls string) bool {
-		return strings.Contains(calls, "pirates-default-music-")
+		return strings.Contains(calls, "textbeards-treasure-default-music-")
 	})
 
 	mute.SetMuted(true)
@@ -259,7 +259,7 @@ func TestMuteControllerPausesAndResumesMusic(t *testing.T) {
 	mute.SetMuted(false)
 	waitForRecordedCalls(t, callsPath, func(calls string) bool {
 		for _, line := range strings.Split(calls, "\n") {
-			if strings.Contains(line, "pirates-default-music-") && strings.Contains(line, "-ss") {
+			if strings.Contains(line, "textbeards-treasure-default-music-") && strings.Contains(line, "-ss") {
 				return true
 			}
 		}
@@ -274,17 +274,17 @@ func TestMusicPlayerSwitchesToTavernAndBack(t *testing.T) {
 	player.Start()
 	defer player.Stop()
 	waitForRecordedCalls(t, callsPath, func(calls string) bool {
-		return strings.Contains(calls, "pirates-default-music-")
+		return strings.Contains(calls, "textbeards-treasure-default-music-")
 	})
 
 	player.EnterPort()
 	waitForRecordedCalls(t, callsPath, func(calls string) bool {
-		return strings.Contains(calls, "pirates-tavern-music-")
+		return strings.Contains(calls, "textbeards-treasure-tavern-music-")
 	})
 
 	player.LeavePort()
 	waitForRecordedCalls(t, callsPath, func(calls string) bool {
-		return strings.Count(calls, "pirates-default-music-") >= 2
+		return strings.Count(calls, "textbeards-treasure-default-music-") >= 2
 	})
 }
 
@@ -295,12 +295,12 @@ func TestMusicPlayerResumesInterruptedTrackFromLastOffset(t *testing.T) {
 	player.Start()
 	defer player.Stop()
 	waitForRecordedCalls(t, callsPath, func(calls string) bool {
-		return strings.Contains(calls, "pirates-default-music-")
+		return strings.Contains(calls, "textbeards-treasure-default-music-")
 	})
 
 	player.EnterPort()
 	waitForRecordedCalls(t, callsPath, func(calls string) bool {
-		return strings.Contains(calls, "pirates-tavern-music-")
+		return strings.Contains(calls, "textbeards-treasure-tavern-music-")
 	})
 	waitForCondition(t, func() bool {
 		return player.trackOffset(defaultMusicTrack) > 0
@@ -309,7 +309,7 @@ func TestMusicPlayerResumesInterruptedTrackFromLastOffset(t *testing.T) {
 	player.LeavePort()
 	waitForRecordedCalls(t, callsPath, func(calls string) bool {
 		for _, line := range strings.Split(calls, "\n") {
-			if strings.Contains(line, "pirates-default-music-") && strings.Contains(line, "-ss") {
+			if strings.Contains(line, "textbeards-treasure-default-music-") && strings.Contains(line, "-ss") {
 				return true
 			}
 		}

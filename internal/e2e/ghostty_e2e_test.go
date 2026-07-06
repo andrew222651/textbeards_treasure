@@ -41,11 +41,11 @@ func TestGhosttyHeldWKeyMovesShipForwardUntilRelease(t *testing.T) {
 
 	repoRoot := findRepoRoot(t)
 	tempDir := t.TempDir()
-	binPath := filepath.Join(tempDir, "pirates-e2e")
+	binPath := filepath.Join(tempDir, "textbeards-treasure-e2e")
 	positionLogPath := filepath.Join(tempDir, "position.log")
-	title := fmt.Sprintf("pirates-e2e-%d-%d", os.Getpid(), time.Now().UnixNano())
+	title := fmt.Sprintf("textbeards-treasure-e2e-%d-%d", os.Getpid(), time.Now().UnixNano())
 
-	build := exec.Command("go", "build", "-o", binPath, "./cmd/pirates")
+	build := exec.Command("go", "build", "-o", binPath, "./cmd/textbeards_treasure")
 	build.Dir = repoRoot
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build test binary: %v\n%s", err, output)
@@ -58,7 +58,7 @@ func TestGhosttyHeldWKeyMovesShipForwardUntilRelease(t *testing.T) {
 		"--class="+title,
 		"--window-width=80",
 		"--window-height=24",
-		"-e", "env", "PIRATES_POSITION_LOG="+positionLogPath, binPath,
+		"-e", "env", "TEXTBEARDS_TREASURE_POSITION_LOG="+positionLogPath, binPath,
 	)
 	ghosttyCmd.Dir = repoRoot
 	if err := ghosttyCmd.Start(); err != nil {

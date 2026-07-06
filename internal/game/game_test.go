@@ -15,6 +15,74 @@ func TestDefaultMapIsLargerThanTypicalViewport(t *testing.T) {
 	}
 }
 
+func TestMapHasLandInAllFourCorners(t *testing.T) {
+	g := New(Config{Width: 80, Height: 40})
+
+	for _, cell := range []gridCell{
+		{x: 1, y: 1},
+		{x: g.Width() - 2, y: 1},
+		{x: 1, y: g.Height() - 2},
+		{x: g.Width() - 2, y: g.Height() - 2},
+	} {
+		if !g.CellIsIsland(cell.x, cell.y) {
+			t.Fatalf("expected corner land at %#v", cell)
+		}
+	}
+
+	if g.CellIsIsland(g.Width()/2, 1) || g.CellIsIsland(1, g.Height()/2) {
+		t.Fatal("expected corner land not to fill whole map edges")
+	}
+}
+
+func TestCornerLandHasIrregularShoreline(t *testing.T) {
+	width, height := 80, 40
+	landWidth := cornerLandWidth(width)
+	landHeight := cornerLandHeight(height)
+
+	fullRectangleCells := landWidth * landHeight
+	landCells := 0
+	rowWidths := map[int]bool{}
+	for y := 0; y < landHeight; y++ {
+		rowWidth := 0
+		for x := 0; x < landWidth; x++ {
+			if cornerLandContains(x, y, width, height) {
+				landCells++
+				rowWidth++
+			}
+		}
+		rowWidths[rowWidth] = true
+	}
+
+	if landCells <= 0 || landCells >= fullRectangleCells {
+		t.Fatalf("expected irregular corner land not to be empty or rectangular, cells=%d rectangle=%d", landCells, fullRectangleCells)
+	}
+	if len(rowWidths) < 3 {
+		t.Fatalf("expected varied row widths along shoreline, got %#v", rowWidths)
+	}
+}
+
+func TestCornerPortsSitAtEdgeOfCornerLand(t *testing.T) {
+	for _, corner := range []MapCorner{CornerNW, CornerNE, CornerSE, CornerSW} {
+		position := cornerPortPosition(corner, 80, 40)
+		port := Port{Position: position}
+		bounds := portBounds(port, 80, 40)
+		touchesLand := false
+		touchesWater := false
+		for y := bounds.top; y <= bounds.bottom; y++ {
+			for x := bounds.left; x <= bounds.right; x++ {
+				if cornerLandContains(x, y, 80, 40) {
+					touchesLand = true
+				} else {
+					touchesWater = true
+				}
+			}
+		}
+		if !touchesLand || !touchesWater {
+			t.Fatalf("expected %v port at land edge, position=%#v touchesLand=%v touchesWater=%v", corner, position, touchesLand, touchesWater)
+		}
+	}
+}
+
 func TestDefaultMapHasMiddleIslandWithWaterAroundIt(t *testing.T) {
 	g := New(Config{})
 	islands := g.Islands()
@@ -125,7 +193,7 @@ func TestPortsStartAtMapCornersWithIndependentPrices(t *testing.T) {
 	if ports[0].Name != "Port Royal" {
 		t.Fatalf("expected first port Port Royal, got %q", ports[0].Name)
 	}
-	assertPosition(t, ports[0].Position, 0, 37)
+	assertPosition(t, ports[0].Position, 0, 33)
 	if ports[0].Prices[GoodRum] != 10 || ports[0].Prices[GoodSugar] != 11 || ports[0].Prices[GoodTobacco] != 12 {
 		t.Fatalf("unexpected Port Royal prices: %#v", ports[0].Prices)
 	}
@@ -133,7 +201,7 @@ func TestPortsStartAtMapCornersWithIndependentPrices(t *testing.T) {
 	if ports[1].Name != "Havana" {
 		t.Fatalf("expected second port Havana, got %q", ports[1].Name)
 	}
-	assertPosition(t, ports[1].Position, 70, 0)
+	assertPosition(t, ports[1].Position, 70, 4)
 	if ports[1].Prices[GoodRum] != 20 || ports[1].Prices[GoodSugar] != 21 || ports[1].Prices[GoodTobacco] != 22 {
 		t.Fatalf("unexpected Havana prices: %#v", ports[1].Prices)
 	}
@@ -307,7 +375,7 @@ func TestShipCenterIsClampedToKeepLargerShipVisible(t *testing.T) {
 	g.heading = HeadingSE
 	g.PressControl(ControlForward)
 	g.Update(time.Second)
-	assertPosition(t, g.Ship(), 5, 5)
+	assertPosition(t, g.Ship(), 4, 3)
 }
 
 func TestPlayerShipCannotSailThroughIsland(t *testing.T) {
@@ -613,7 +681,7 @@ func TestPortStartsInBottomLeftWithGoldAndPrices(t *testing.T) {
 	if port.Name != "Port Royal" {
 		t.Fatalf("expected port name Port Royal, got %q", port.Name)
 	}
-	assertPosition(t, port.Position, 0, 17)
+	assertPosition(t, port.Position, 0, 15)
 	if g.Gold() != 100 {
 		t.Fatalf("expected 100 starting gold, got %d", g.Gold())
 	}
@@ -1084,6 +1152,105 @@ func TestPortUpgradeAssignmentUsesNoUpgradeWhenUniqueUpgradesRunOut(t *testing.T
 	}
 }
 
+func TestPointsIncludeGoldAndActualUpgradePurchaseValues(t *testing.T) {
+	g := New(Config{
+		Width:        40,
+		Height:       20,
+		StartingGold: 750,
+		PortUpgrades: map[string]UpgradeKind{
+			"Port Royal": UpgradeHull,
+		},
+	})
+	dockAtPortRoyal(g)
+	g.ports[0].UpgradePrice = 750
+	g.totalNonGoodPurchaseValue = totalNonGoodPurchaseValue(g.ports)
+
+	if got := g.Points(); got != 750 {
+		t.Fatalf("expected starting points to equal gold, got %d", got)
+	}
+	paid := g.BuyPortUpgrade()
+	if paid != 750 {
+		t.Fatalf("expected upgrade to use actual port price 750, paid %d", paid)
+	}
+	if got := g.Gold(); got != 0 {
+		t.Fatalf("expected upgrade purchase to spend gold, got %d", got)
+	}
+	if got := g.Points(); got != 750 {
+		t.Fatalf("expected points to preserve purchased upgrade value, got %d", got)
+	}
+}
+
+func TestPointsDoNotIncludePurchasedGoods(t *testing.T) {
+	g := New(Config{
+		Width:        40,
+		Height:       20,
+		StartingGold: 100,
+		PortPrices: map[Good]int{
+			GoodRum: 10,
+		},
+	})
+	dockAtPortRoyal(g)
+
+	if bought := g.Buy(GoodRum, 3); bought != 3 {
+		t.Fatalf("expected to buy 3 rum, bought %d", bought)
+	}
+	if got := g.Points(); got != 70 {
+		t.Fatalf("expected points to track current gold only after goods purchase, got %d", got)
+	}
+}
+
+func TestEnemyDifficultyScalesWithPointsAndCaps(t *testing.T) {
+	g := New(Config{Width: 100, Height: 100, EnemyAggroRange: 20, EnemyDensityCells: 2000})
+
+	if got := g.Points(); got != defaultGold {
+		t.Fatalf("expected default starting points %d, got %d", defaultGold, got)
+	}
+	if got := g.currentEnemyAggroRange(); got != 20 {
+		t.Fatalf("expected base aggro range at 100 points, got %.2f", got)
+	}
+	if got := g.maxEnemyShips(); got != 5 {
+		t.Fatalf("expected base enemy cap 5 at 100 points, got %d", got)
+	}
+
+	g.gold = (defaultGold + g.enemyDifficultyMaxPoints()) / 2
+	if got := g.currentEnemyAggroRange(); got <= 20 || got >= 60 {
+		t.Fatalf("expected mid-game aggro range between 20 and 60, got %.2f", got)
+	}
+	if got := g.maxEnemyShips(); got <= 5 || got >= 15 {
+		t.Fatalf("expected mid-game enemy cap between 5 and 15, got %d", got)
+	}
+
+	g.gold = g.enemyDifficultyMaxPoints()
+	if got := g.currentEnemyAggroRange(); got != 60 {
+		t.Fatalf("expected max aggro range 60, got %.2f", got)
+	}
+	if got := g.maxEnemyShips(); got != 15 {
+		t.Fatalf("expected max enemy cap 15, got %d", got)
+	}
+
+	g.gold = g.enemyDifficultyMaxPoints() + 10000
+	if got := g.currentEnemyAggroRange(); got != 60 {
+		t.Fatalf("expected aggro range to stay capped at 60, got %.2f", got)
+	}
+	if got := g.maxEnemyShips(); got != 15 {
+		t.Fatalf("expected enemy cap to stay capped at 15, got %d", got)
+	}
+}
+
+func TestHigherPointsAllowEnemyEngagementAtScaledRange(t *testing.T) {
+	g := New(Config{Width: 80, Height: 40, EnemyAggroRange: 5})
+	g.enemy.Position = Position{X: 40, Y: 20}
+	g.ship = Position{X: 30, Y: 20}
+
+	if g.enemyCanEngage(g.enemy.Position) {
+		t.Fatal("expected enemy not to engage at base range")
+	}
+	g.gold = g.enemyDifficultyMaxPoints()
+	if !g.enemyCanEngage(g.enemy.Position) {
+		t.Fatal("expected enemy to engage once points scale aggro range")
+	}
+}
+
 func TestBuyingHullUpgradeIncreasesMaxAndCurrentHitPointsOnce(t *testing.T) {
 	g := New(Config{
 		Width:  40,
@@ -1187,7 +1354,7 @@ func TestBuyingCannonUpgradeDoesNotReduceEnemyCooldown(t *testing.T) {
 		t.Fatalf("expected player cannon cooldown %s after upgrade, got %s", want, got)
 	}
 
-	g.ship = Position{X: 30, Y: 20}
+	g.ship = Position{X: 24, Y: 20}
 	g.heading = HeadingN
 	g.enemy.Position = Position{X: 40, Y: 20}
 	g.enemy.Heading = HeadingN
@@ -1792,6 +1959,24 @@ func TestEnemyFiresWhenPlayerGetsClose(t *testing.T) {
 	assertPosition(t, shots[0].Position, 37, 20)
 }
 
+func TestHighPointsDoNotIncreaseEnemyGrapeShotRange(t *testing.T) {
+	g := New(Config{Width: 80, Height: 40, ShotSpeed: 1, EnemyAggroRange: 20})
+	g.gold = g.enemyDifficultyMaxPoints()
+	g.enemy.Position = Position{X: 40, Y: 20}
+	g.enemy.Heading = HeadingN
+	g.ship = Position{X: 30, Y: 20}
+
+	g.Update(time.Millisecond)
+
+	shots := g.Shots()
+	if len(shots) != 1 {
+		t.Fatalf("expected one enemy cannonball outside close range, got %d shots", len(shots))
+	}
+	if shots[0].Load != LoadCannonballs {
+		t.Fatalf("expected high points not to widen grape-shot range, got %#v", shots[0])
+	}
+}
+
 func TestEnemyUsesGrapeShotAtCloseRange(t *testing.T) {
 	g := New(Config{Width: 80, Height: 40, ShotSpeed: 1, EnemyAggroRange: 24})
 	g.enemy.Position = Position{X: 42, Y: 20}
@@ -1966,7 +2151,8 @@ func TestFiveEnemyGrapeShotHitsDestroyPlayer(t *testing.T) {
 }
 
 func TestShotsAreRemovedAtScreenEdge(t *testing.T) {
-	g := New(Config{Width: 8, Height: 8, ShotSpeed: 10, CannonRange: 100})
+	g := New(Config{Width: 30, Height: 30, ShotSpeed: 10, CannonRange: 100})
+	g.ship = Position{X: 15, Y: 15}
 	g.heading = HeadingN
 
 	g.FireCannon(CannonLeft)

@@ -98,7 +98,7 @@ func (p *CannonFirePlayer) Close() error {
 
 func (p *CannonFirePlayer) soundPath() (string, bool) {
 	p.prepareOnce.Do(func() {
-		p.path, p.prepareErr = writeEmbeddedAsset(cannonFireAsset, "pirates-cannon-fire-*.ogg")
+		p.path, p.prepareErr = writeEmbeddedAsset(cannonFireAsset, "textbeards-treasure-cannon-fire-*.ogg")
 	})
 	return p.path, p.prepareErr == nil && p.path != ""
 }
@@ -174,7 +174,7 @@ func (p *RepairPlayer) Close() error {
 
 func (p *RepairPlayer) soundPath() (string, bool) {
 	p.prepareOnce.Do(func() {
-		p.path, p.prepareErr = writeEmbeddedAsset(repairAsset, "pirates-repair-*.ogg")
+		p.path, p.prepareErr = writeEmbeddedAsset(repairAsset, "textbeards-treasure-repair-*.ogg")
 	})
 	return p.path, p.prepareErr == nil && p.path != ""
 }
@@ -250,7 +250,7 @@ func (p *TradePlayer) Close() error {
 
 func (p *TradePlayer) soundPath() (string, bool) {
 	p.prepareOnce.Do(func() {
-		p.path, p.prepareErr = writeEmbeddedAsset(tradeAsset, "pirates-trade-*.wav")
+		p.path, p.prepareErr = writeEmbeddedAsset(tradeAsset, "textbeards-treasure-trade-*.wav")
 	})
 	return p.path, p.prepareErr == nil && p.path != ""
 }
@@ -326,7 +326,7 @@ func (p *HitPlayer) Close() error {
 
 func (p *HitPlayer) soundPath() (string, bool) {
 	p.prepareOnce.Do(func() {
-		p.path, p.prepareErr = writeEmbeddedAsset(hitAsset, "pirates-hit-*.wav")
+		p.path, p.prepareErr = writeEmbeddedAsset(hitAsset, "textbeards-treasure-hit-*.wav")
 	})
 	return p.path, p.prepareErr == nil && p.path != ""
 }
@@ -403,7 +403,7 @@ func (p *SplashPlayer) Close() error {
 
 func (p *SplashPlayer) soundPath() (string, bool) {
 	p.prepareOnce.Do(func() {
-		p.path, p.prepareErr = writeEmbeddedAsset(splashAsset, "pirates-splash-*.ogg")
+		p.path, p.prepareErr = writeEmbeddedAsset(splashAsset, "textbeards-treasure-splash-*.ogg")
 	})
 	return p.path, p.prepareErr == nil && p.path != ""
 }
@@ -790,8 +790,8 @@ func writeEmbeddedAsset(assetPath, pattern string) (string, error) {
 
 func musicAssets() map[musicTrack]musicAsset {
 	return map[musicTrack]musicAsset{
-		defaultMusicTrack: {assetPath: defaultMusicAsset, pathPattern: "pirates-default-music-*.wav"},
-		tavernMusicTrack:  {assetPath: tavernMusicAsset, pathPattern: "pirates-tavern-music-*.ogg"},
+		defaultMusicTrack: {assetPath: defaultMusicAsset, pathPattern: "textbeards-treasure-default-music-*.wav"},
+		tavernMusicTrack:  {assetPath: tavernMusicAsset, pathPattern: "textbeards-treasure-tavern-music-*.ogg"},
 	}
 }
 
