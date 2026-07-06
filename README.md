@@ -1,4 +1,4 @@
-# Textbeards Treasure
+# Textbeard's Treasure
 
 A Golang TUI game.
 

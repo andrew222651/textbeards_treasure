@@ -1037,14 +1037,14 @@ func (g *Game) updateEnemyMovement(dt time.Duration) {
 		return
 	}
 
-	if !g.enemyDestroyed && g.moveEnemyForward(&g.enemy, dt) {
+	if !g.enemyDestroyed && g.moveEnemyForward(&g.enemy, dt, true, -1, nil) {
 		g.enemyDestroyed = true
 	}
 
 	kept := g.spawnedEnemies[:0]
 	for i := range g.spawnedEnemies {
 		enemy := g.spawnedEnemies[i]
-		if g.moveEnemyForward(&enemy, dt) {
+		if g.moveEnemyForward(&enemy, dt, false, i, kept) {
 			continue
 		}
 		kept = append(kept, enemy)
@@ -1052,7 +1052,7 @@ func (g *Game) updateEnemyMovement(dt time.Duration) {
 	g.spawnedEnemies = kept
 }
 
-func (g *Game) moveEnemyForward(enemy *EnemyShip, dt time.Duration) bool {
+func (g *Game) moveEnemyForward(enemy *EnemyShip, dt time.Duration, primary bool, spawnedIndex int, movedSpawned []EnemyShip) bool {
 	if dt <= 0 || enemy.hitPoints <= 0 {
 		return false
 	}
@@ -1067,13 +1067,43 @@ func (g *Game) moveEnemyForward(enemy *EnemyShip, dt time.Duration) bool {
 	dx, dy := headingStep(enemy.Heading)
 	for step := 0; step < steps; step++ {
 		next := Position{X: enemy.Position.X + float64(dx), Y: enemy.Position.Y + float64(dy)}
-		if g.enemyIntersectsIsland(*enemy, next) {
+		if g.enemyIntersectsIsland(*enemy, next) || g.enemyMovementBlocked(*enemy, next, primary, spawnedIndex, movedSpawned) {
 			enemy.Heading = rotatedHeading(enemy.Heading, 1)
 			enemy.moveRemainder = 0
 			return false
 		}
 		enemy.Position = next
 		if g.enemyTouchesMapEdge(*enemy) {
+			return true
+		}
+	}
+	return false
+}
+
+func (g *Game) enemyMovementBlocked(enemy EnemyShip, next Position, primary bool, spawnedIndex int, movedSpawned []EnemyShip) bool {
+	candidate := enemy
+	candidate.Position = next
+	if movementIncreasesOrMaintainsOverlap(enemyCollisionFootprint(enemy), enemyCollisionFootprint(candidate), shipCollisionFootprint(g.ship, g.heading)) {
+		return true
+	}
+	if primary {
+		for _, existing := range g.spawnedEnemies {
+			if movementIncreasesOrMaintainsOverlap(enemyCollisionFootprint(enemy), enemyCollisionFootprint(candidate), enemyCollisionFootprint(existing)) {
+				return true
+			}
+		}
+		return false
+	}
+	if !g.enemyDestroyed && movementIncreasesOrMaintainsOverlap(enemyCollisionFootprint(enemy), enemyCollisionFootprint(candidate), enemyCollisionFootprint(g.enemy)) {
+		return true
+	}
+	for _, existing := range movedSpawned {
+		if movementIncreasesOrMaintainsOverlap(enemyCollisionFootprint(enemy), enemyCollisionFootprint(candidate), enemyCollisionFootprint(existing)) {
+			return true
+		}
+	}
+	for i := spawnedIndex + 1; i < len(g.spawnedEnemies); i++ {
+		if movementIncreasesOrMaintainsOverlap(enemyCollisionFootprint(enemy), enemyCollisionFootprint(candidate), enemyCollisionFootprint(g.spawnedEnemies[i])) {
 			return true
 		}
 	}
@@ -1463,7 +1493,7 @@ func (g *Game) stepAlongHeading(throttle int, steps int) {
 			X: clamp(g.ship.X+float64(dx), minX, maxX),
 			Y: clamp(g.ship.Y+float64(dy), minY, maxY),
 		}
-		if next == g.ship || g.shipIntersectsIsland(next, g.heading) {
+		if next == g.ship || g.shipIntersectsIsland(next, g.heading) || g.playerMovementBlocked(next, g.heading) {
 			g.moveRemainder = 0
 			break
 		}
@@ -1474,6 +1504,20 @@ func (g *Game) stepAlongHeading(throttle int, steps int) {
 	if g.ship != before && g.onMove != nil {
 		g.onMove(g.ship)
 	}
+}
+
+func (g *Game) playerMovementBlocked(position Position, heading Heading) bool {
+	current := shipCollisionFootprint(g.ship, g.heading)
+	candidate := shipCollisionFootprint(position, heading)
+	if !g.enemyDestroyed && movementIncreasesOrMaintainsOverlap(current, candidate, enemyCollisionFootprint(g.enemy)) {
+		return true
+	}
+	for _, enemy := range g.spawnedEnemies {
+		if movementIncreasesOrMaintainsOverlap(current, candidate, enemyCollisionFootprint(enemy)) {
+			return true
+		}
+	}
+	return false
 }
 
 func (g *Game) fireCannonFrom(position Position, shipHeading Heading, load CannonLoad, side CannonSide, owner ShotOwner) {
@@ -1679,6 +1723,10 @@ func shotIntersectsEnemy(shot Shot, enemy EnemyShip) bool {
 }
 
 func shotIntersectsDiagonalShipHitbox(shotCell gridCell, position Position, heading Heading) bool {
+	return cellIntersectsDiagonalShipHitbox(shotCell, position, heading)
+}
+
+func cellIntersectsDiagonalShipHitbox(cell gridCell, position Position, heading Heading) bool {
 	if !headingIsDiagonal(heading) {
 		return false
 	}
@@ -1687,8 +1735,8 @@ func shotIntersectsDiagonalShipHitbox(shotCell gridCell, position Position, head
 	cy := int(math.Round(position.Y))
 	dx, dy := headingStep(heading)
 	leftDX, leftDY := dy, -dx
-	rx := shotCell.x - cx
-	ry := shotCell.y - cy
+	rx := cell.x - cx
+	ry := cell.y - cy
 	forward2 := absInt(rx*dx + ry*dy)
 	lateral2 := absInt(rx*leftDX + ry*leftDY)
 	if forward2 > 6 || lateral2 > 4 {
@@ -2300,6 +2348,37 @@ func shipFootprint(position Position, heading Heading) []gridCell {
 	return shipFootprintFromOffsets(position, heading, regularShipFootprintOffsets())
 }
 
+func shipCollisionFootprint(position Position, heading Heading) []gridCell {
+	cells := shipFootprint(position, heading)
+	if !headingIsDiagonal(heading) {
+		return cells
+	}
+
+	cx := int(math.Round(position.X))
+	cy := int(math.Round(position.Y))
+	seen := make(map[gridCell]bool, len(cells)+35)
+	for _, cell := range cells {
+		seen[cell] = true
+	}
+	for y := cy - 5; y <= cy+5; y++ {
+		for x := cx - 5; x <= cx+5; x++ {
+			cell := gridCell{x: x, y: y}
+			if !seen[cell] && cellIntersectsDiagonalShipHitbox(cell, position, heading) {
+				cells = append(cells, cell)
+				seen[cell] = true
+			}
+		}
+	}
+	return cells
+}
+
+func enemyCollisionFootprint(enemy EnemyShip) []gridCell {
+	if enemy.Kind == EnemyShipSmall {
+		return enemyFootprint(enemy)
+	}
+	return shipCollisionFootprint(enemy.Position, enemy.Heading)
+}
+
 func enemyFootprint(enemy EnemyShip) []gridCell {
 	if enemy.Kind == EnemyShipSmall {
 		return shipFootprintFromOffsets(enemy.Position, enemy.Heading, smallShipFootprintOffsets())
@@ -2344,6 +2423,49 @@ func smallShipFootprintOffsets() []gridCell {
 		{x: 0, y: -1},
 		{x: 0, y: 1},
 	}
+}
+
+func shipOverlapsEnemy(position Position, heading Heading, enemy EnemyShip) bool {
+	return footprintCellsOverlap(shipCollisionFootprint(position, heading), enemyCollisionFootprint(enemy))
+}
+
+func enemyOverlapsShip(enemy EnemyShip, position Position, heading Heading) bool {
+	return footprintCellsOverlap(enemyCollisionFootprint(enemy), shipCollisionFootprint(position, heading))
+}
+
+func enemyShipsOverlap(a EnemyShip, b EnemyShip) bool {
+	return footprintCellsOverlap(enemyCollisionFootprint(a), enemyCollisionFootprint(b))
+}
+
+func movementIncreasesOrMaintainsOverlap(current []gridCell, candidate []gridCell, obstacle []gridCell) bool {
+	nextCount := footprintOverlapCount(candidate, obstacle)
+	if nextCount == 0 {
+		return false
+	}
+	return nextCount >= footprintOverlapCount(current, obstacle)
+}
+
+func footprintOverlapCount(a []gridCell, b []gridCell) int {
+	count := 0
+	for _, aCell := range a {
+		for _, bCell := range b {
+			if aCell == bCell {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+func footprintCellsOverlap(a []gridCell, b []gridCell) bool {
+	for _, aCell := range a {
+		for _, bCell := range b {
+			if aCell == bCell {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func shipsOverlap(a Position, aHeading Heading, b Position, bHeading Heading) bool {

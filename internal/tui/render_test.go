@@ -166,7 +166,17 @@ func TestRenderScrollsToBottomLeftMapEdgeAndPort(t *testing.T) {
 }
 
 func TestRenderScrollsToTopRightMapEdgeAndPort(t *testing.T) {
-	g := game.New(game.Config{Width: 60, Height: 30, PortCorners: []game.MapCorner{game.CornerSW, game.CornerNE}})
+	g := game.New(game.Config{
+		Width:           60,
+		Height:          30,
+		ShotSpeed:       1000,
+		CannonRange:     100,
+		EnemyAggroRange: 101,
+		EnemyShipSpeed:  0.001,
+		CannonCooldown:  time.Nanosecond,
+		PortCorners:     []game.MapCorner{game.CornerSW, game.CornerNE},
+	})
+	sinkOpeningEnemy(t, g)
 	sailToTopRightPort(t, g)
 
 	frame := Render(g, 30, 10)
@@ -266,6 +276,17 @@ func TestRenderDrawsShots(t *testing.T) {
 	g.FireCannon(game.CannonLeft)
 	frame = Render(g, 30, 10)
 	assertGlyphCount(t, frame, "*", 3)
+}
+
+func sinkOpeningEnemy(t *testing.T, g *game.Game) {
+	t.Helper()
+
+	for i := 0; i < 3; i++ {
+		if !g.FireCannon(game.CannonRight) {
+			t.Fatalf("expected cannon shot %d to fire", i+1)
+		}
+		g.Update(100 * time.Millisecond)
+	}
 }
 
 func sailToTopRightPort(t *testing.T, g *game.Game) {

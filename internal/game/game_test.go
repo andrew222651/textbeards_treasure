@@ -366,6 +366,7 @@ func TestSetBoundsPreservesRelativeShipPosition(t *testing.T) {
 
 func TestShipCenterIsClampedToKeepLargerShipVisible(t *testing.T) {
 	g := New(Config{Width: 9, Height: 9, ShipSpeed: 100})
+	g.enemyDestroyed = true
 
 	g.PressControl(ControlForward)
 	g.Update(time.Second)
@@ -376,6 +377,51 @@ func TestShipCenterIsClampedToKeepLargerShipVisible(t *testing.T) {
 	g.PressControl(ControlForward)
 	g.Update(time.Second)
 	assertPosition(t, g.Ship(), 4, 3)
+}
+
+func TestPlayerShipCannotMoveIntoEnemyShip(t *testing.T) {
+	g := New(Config{Width: 80, Height: 40, ShipSpeed: 10, EnemyShipSpeed: 0.001, EnemyAggroRange: 1})
+	g.ship = Position{X: 20, Y: 20}
+	g.heading = HeadingE
+	g.enemy.Position = Position{X: 27, Y: 20}
+	g.enemy.Heading = HeadingE
+	start := g.Ship()
+
+	if shipsOverlap(g.ship, g.heading, g.enemy.Position, g.enemy.Heading) {
+		t.Fatal("test setup starts overlapped")
+	}
+	g.PressControl(ControlForward)
+	g.Update(100 * time.Millisecond)
+
+	assertPosition(t, g.Ship(), start.X, start.Y)
+	if shipOverlapsEnemy(g.ship, g.heading, g.enemy) {
+		t.Fatal("expected player ship not to overlap enemy after blocked movement")
+	}
+}
+
+func TestPlayerShipCannotMoveThroughDiagonalEnemyHitboxGap(t *testing.T) {
+	g := New(Config{Width: 80, Height: 40, ShipSpeed: 10, EnemyShipSpeed: 0.001, EnemyAggroRange: 1})
+	g.ship = Position{X: 25, Y: 19}
+	g.heading = HeadingN
+	g.enemy.Position = Position{X: 20, Y: 20}
+	g.enemy.Heading = HeadingNE
+	start := g.Ship()
+	next := Position{X: 25, Y: 18}
+
+	if shipOverlapsEnemy(g.ship, g.heading, g.enemy) {
+		t.Fatal("test setup starts overlapped")
+	}
+	if footprintCellsOverlap(shipFootprint(next, g.heading), enemyFootprint(g.enemy)) {
+		t.Fatal("test setup should target a gap in the sparse rendered footprint")
+	}
+	if !shipOverlapsEnemy(next, g.heading, g.enemy) {
+		t.Fatal("expected next step to overlap the filled diagonal collision hitbox")
+	}
+
+	g.PressControl(ControlForward)
+	g.Update(100 * time.Millisecond)
+
+	assertPosition(t, g.Ship(), start.X, start.Y)
 }
 
 func TestPlayerShipCannotSailThroughIsland(t *testing.T) {
@@ -1495,6 +1541,29 @@ func TestSelectedTradeGoodAndQuantityControls(t *testing.T) {
 	}
 	if g.TradeQuantity() != 1 {
 		t.Fatalf("expected quantity floor at 1, got %d", g.TradeQuantity())
+	}
+}
+
+func TestEnemyShipCannotMoveIntoPlayerShip(t *testing.T) {
+	g := New(Config{Width: 80, Height: 40, EnemyShipSpeed: 10, EnemyAggroRange: 1})
+	g.ship = Position{X: 20, Y: 20}
+	g.heading = HeadingE
+	g.enemy.Position = Position{X: 27, Y: 20}
+	g.enemy.Heading = HeadingW
+	start := g.enemy.Position
+
+	if shipOverlapsEnemy(g.ship, g.heading, g.enemy) {
+		t.Fatal("test setup starts overlapped")
+	}
+	g.Update(100 * time.Millisecond)
+
+	enemy, ok := g.Enemy()
+	if !ok {
+		t.Fatal("expected enemy to remain after blocked movement")
+	}
+	assertPosition(t, enemy.Position, start.X, start.Y)
+	if enemyOverlapsShip(enemy, g.ship, g.heading) {
+		t.Fatal("expected enemy ship not to overlap player after blocked movement")
 	}
 }
 
