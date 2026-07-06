@@ -10,13 +10,15 @@ import (
 	"time"
 )
 
-func TestCannonFireSoundIsEmbedded(t *testing.T) {
-	data, err := embeddedAssets.ReadFile(cannonFireAsset)
-	if err != nil {
-		t.Fatalf("expected embedded cannon sound: %v", err)
-	}
-	if len(data) == 0 {
-		t.Fatal("expected embedded cannon sound to be non-empty")
+func TestOneShotSoundsAreEmbedded(t *testing.T) {
+	for _, asset := range []string{cannonFireAsset, repairAsset, tradeAsset, splashAsset} {
+		data, err := embeddedAssets.ReadFile(asset)
+		if err != nil {
+			t.Fatalf("expected embedded one-shot sound %s: %v", asset, err)
+		}
+		if len(data) == 0 {
+			t.Fatalf("expected embedded one-shot sound %s to be non-empty", asset)
+		}
 	}
 }
 
@@ -43,6 +45,102 @@ func TestCannonFirePlayerPreparesTemporarySoundFile(t *testing.T) {
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected temp sound file to be removed, stat err=%v", err)
 	}
+}
+
+func TestRepairPlayerPreparesTemporarySoundFile(t *testing.T) {
+	player := NewRepairPlayer()
+	path, ok := player.soundPath()
+	if !ok {
+		t.Fatal("expected repair sound path to be prepared")
+	}
+	if filepath.Ext(path) != ".ogg" {
+		t.Fatalf("expected .ogg temp file, got %q", path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("expected temp repair sound file to be readable: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("expected temp repair sound file to be non-empty")
+	}
+
+	if err := player.Close(); err != nil {
+		t.Fatalf("expected close to remove temp file: %v", err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected temp repair sound file to be removed, stat err=%v", err)
+	}
+}
+
+func TestTradePlayerPreparesTemporarySoundFile(t *testing.T) {
+	player := NewTradePlayer()
+	path, ok := player.soundPath()
+	if !ok {
+		t.Fatal("expected trade sound path to be prepared")
+	}
+	if filepath.Ext(path) != ".wav" {
+		t.Fatalf("expected .wav temp file, got %q", path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("expected temp trade sound file to be readable: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("expected temp trade sound file to be non-empty")
+	}
+
+	if err := player.Close(); err != nil {
+		t.Fatalf("expected close to remove temp file: %v", err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected temp trade sound file to be removed, stat err=%v", err)
+	}
+}
+
+func TestSplashPlayerPreparesTemporarySoundFile(t *testing.T) {
+	player := NewSplashPlayer()
+	path, ok := player.soundPath()
+	if !ok {
+		t.Fatal("expected splash sound path to be prepared")
+	}
+	if filepath.Ext(path) != ".ogg" {
+		t.Fatalf("expected .ogg temp file, got %q", path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("expected temp splash sound file to be readable: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("expected temp splash sound file to be non-empty")
+	}
+
+	if err := player.Close(); err != nil {
+		t.Fatalf("expected close to remove temp file: %v", err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected temp splash sound file to be removed, stat err=%v", err)
+	}
+}
+
+func TestMuteControllerSuppressesOneShotSounds(t *testing.T) {
+	callsPath := installFakeFFPlay(t)
+	mute := NewMuteController(nil)
+	player := NewTradePlayer()
+	player.SetMutedFunc(mute.Muted)
+	defer player.Close()
+
+	mute.SetMuted(true)
+	player.Play()
+	time.Sleep(50 * time.Millisecond)
+	if data, _ := os.ReadFile(callsPath); len(data) != 0 {
+		t.Fatalf("expected muted one-shot sound not to invoke playback, got %q", data)
+	}
+
+	mute.SetMuted(false)
+	player.Play()
+	waitForRecordedCalls(t, callsPath, func(calls string) bool {
+		return strings.Contains(calls, "pirates-trade-")
+	})
 }
 
 func TestMusicTracksAreEmbedded(t *testing.T) {
@@ -115,6 +213,33 @@ func TestMusicPlayerLoopsPlaybackCommandUntilStopped(t *testing.T) {
 	if _, err := os.Stat(player.paths[defaultMusicTrack]); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected temp music file to be removed after stop, stat err=%v", err)
 	}
+}
+
+func TestMuteControllerPausesAndResumesMusic(t *testing.T) {
+	callsPath := installBlockingFakeFFPlay(t)
+
+	player := NewMusicPlayer()
+	mute := NewMuteController(player)
+	player.Start()
+	defer player.Stop()
+	waitForRecordedCalls(t, callsPath, func(calls string) bool {
+		return strings.Contains(calls, "pirates-default-music-")
+	})
+
+	mute.SetMuted(true)
+	waitForCondition(t, func() bool {
+		return player.trackOffset(defaultMusicTrack) > 0
+	})
+
+	mute.SetMuted(false)
+	waitForRecordedCalls(t, callsPath, func(calls string) bool {
+		for _, line := range strings.Split(calls, "\n") {
+			if strings.Contains(line, "pirates-default-music-") && strings.Contains(line, "-ss") {
+				return true
+			}
+		}
+		return false
+	})
 }
 
 func TestMusicPlayerSwitchesToTavernAndBack(t *testing.T) {

@@ -22,6 +22,8 @@ const (
 	EventTradeSell
 	EventRepair
 	EventBuyUpgrade
+	EventMuteToggle
+	EventGoldCheat
 	EventQuit
 )
 
@@ -131,6 +133,10 @@ func parseLegacyByte(b byte) []Event {
 		return []Event{{Type: EventRepair, Legacy: true}}
 	case 117, 85:
 		return []Event{{Type: EventBuyUpgrade, Legacy: true}}
+	case 109, 77:
+		return []Event{{Type: EventMuteToggle, Legacy: true}}
+	case 7:
+		return []Event{{Type: EventGoldCheat, Legacy: true}}
 	case 3:
 		return []Event{{Type: EventQuit}}
 	default:
@@ -214,6 +220,10 @@ func parseCSIU(params string) []Event {
 		return []Event{{Type: EventRepair}}
 	case (keyCode == 117 || keyCode == 85) && eventType != 3:
 		return []Event{{Type: EventBuyUpgrade}}
+	case (keyCode == 109 || keyCode == 77) && eventType == 1:
+		return []Event{{Type: EventMuteToggle}}
+	case (keyCode == 103 || keyCode == 71) && modifiers&4 != 0 && eventType == 1:
+		return []Event{{Type: EventGoldCheat}}
 	case keyCode == 27 && eventType != 3:
 		return []Event{{Type: EventQuit}}
 	case keyCode == 99 && modifiers&4 != 0 && eventType != 3:

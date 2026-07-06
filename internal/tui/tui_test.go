@@ -220,6 +220,69 @@ func TestRepairEventOnlyAppliesInPort(t *testing.T) {
 	}
 }
 
+func TestMuteToggleEventTogglesGameMute(t *testing.T) {
+	g := game.New(game.Config{})
+
+	if handleEvent(g, Event{Type: EventMuteToggle}) {
+		t.Fatal("mute event should not quit")
+	}
+	if !g.Muted() {
+		t.Fatal("expected mute event to mute the game")
+	}
+
+	handleEvent(g, Event{Type: EventMuteToggle})
+	if g.Muted() {
+		t.Fatal("expected second mute event to unmute the game")
+	}
+}
+
+func TestGoldCheatAddsGold(t *testing.T) {
+	g := game.New(game.Config{})
+
+	if handleEvent(g, Event{Type: EventGoldCheat}) {
+		t.Fatal("gold cheat should not quit")
+	}
+	if got := g.Gold(); got != 1100 {
+		t.Fatalf("expected Ctrl-G cheat to add 1000 gold, got %d", got)
+	}
+}
+
+func TestUpdateGameFinalizesScoreWhenGameOverStarts(t *testing.T) {
+	finalized := 0
+	g := game.New(game.Config{
+		Width:           80,
+		Height:          40,
+		ShotSpeed:       10,
+		CannonRange:     25,
+		EnemyAggroRange: 30,
+		EnemyShipSpeed:  0.1,
+		CannonCooldown:  time.Nanosecond,
+		OnScoreFinalized: func(score int) (int, error) {
+			finalized++
+			return score, nil
+		},
+	})
+
+	for i := 0; i < 3 && !g.GameOver(); i++ {
+		if err := updateGame(g, 2*time.Second); err != nil {
+			t.Fatalf("update game: %v", err)
+		}
+	}
+	if !g.GameOver() {
+		t.Fatal("expected repeated enemy cannon fire to destroy the player")
+	}
+	if finalized != 1 || !g.ScoreFinalized() {
+		t.Fatalf("expected score to finalize once on game over, finalized=%d scoreFinalized=%v", finalized, g.ScoreFinalized())
+	}
+
+	if err := updateGame(g, time.Second); err != nil {
+		t.Fatalf("update game after game over: %v", err)
+	}
+	if finalized != 1 {
+		t.Fatalf("expected game-over score finalization to remain idempotent, got %d calls", finalized)
+	}
+}
+
 func TestQuitEventRequestsExit(t *testing.T) {
 	g := game.New(game.Config{})
 

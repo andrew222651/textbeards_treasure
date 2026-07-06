@@ -111,6 +111,31 @@ func TestInputParserParsesLegacyTradeKeys(t *testing.T) {
 	})
 }
 
+func TestInputParserParsesMuteToggleKey(t *testing.T) {
+	var parser InputParser
+
+	events := parser.Feed([]byte("mM\x1b[109;1:1u\x1b[109;1:2u\x1b[109;1:3u\x1b[77;2:1u"))
+
+	assertEvents(t, events, []Event{
+		{Type: EventMuteToggle, Legacy: true},
+		{Type: EventMuteToggle, Legacy: true},
+		{Type: EventMuteToggle},
+		{Type: EventMuteToggle},
+	})
+}
+
+func TestInputParserParsesGoldCheat(t *testing.T) {
+	var parser InputParser
+
+	events := parser.Feed([]byte("\x07\x1b[103;5:1u\x1b[103;5:2u\x1b[103;5:3u\x1b[71;5:1u"))
+
+	assertEvents(t, events, []Event{
+		{Type: EventGoldCheat, Legacy: true},
+		{Type: EventGoldCheat},
+		{Type: EventGoldCheat},
+	})
+}
+
 func TestInputParserIgnoresSpacebarForFiring(t *testing.T) {
 	var parser InputParser
 

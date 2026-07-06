@@ -686,6 +686,55 @@ func TestBuyingAndSellingGoodsAtPort(t *testing.T) {
 	}
 }
 
+func TestTradeCallbackRunsOnlyWhenGoodsAreBoughtOrSold(t *testing.T) {
+	trades := 0
+	g := New(Config{
+		Width:       40,
+		Height:      20,
+		OnTrade:     func() { trades++ },
+		PortCorners: []MapCorner{CornerSW, CornerNE},
+		PortPrices: map[Good]int{
+			GoodRum: 10,
+		},
+	})
+
+	if bought := g.Buy(GoodRum, 1); bought != 0 {
+		t.Fatalf("expected buy away from port to fail, bought %d", bought)
+	}
+	if trades != 0 {
+		t.Fatalf("expected failed buy not to call callback, got %d", trades)
+	}
+
+	dockAtPortRoyal(g)
+	if bought := g.Buy(GoodRum, 0); bought != 0 {
+		t.Fatalf("expected zero-quantity buy to fail, bought %d", bought)
+	}
+	if trades != 0 {
+		t.Fatalf("expected zero-quantity buy not to call callback, got %d", trades)
+	}
+
+	if bought := g.Buy(GoodRum, 2); bought != 2 {
+		t.Fatalf("expected successful buy of 2 rum, bought %d", bought)
+	}
+	if trades != 1 {
+		t.Fatalf("expected successful buy to call callback once, got %d", trades)
+	}
+
+	if sold := g.Sell(GoodSugar, 1); sold != 0 {
+		t.Fatalf("expected sell with no sugar to fail, sold %d", sold)
+	}
+	if trades != 1 {
+		t.Fatalf("expected failed sell not to call callback, got %d", trades)
+	}
+
+	if sold := g.Sell(GoodRum, 1); sold != 1 {
+		t.Fatalf("expected successful sale of 1 rum, sold %d", sold)
+	}
+	if trades != 2 {
+		t.Fatalf("expected successful sell to call callback once, got %d", trades)
+	}
+}
+
 func TestTradingUsesCurrentPortPrices(t *testing.T) {
 	g := New(Config{
 		Width:       80,
@@ -786,6 +835,58 @@ func TestVisitingDifferentPortRegeneratesOtherPortPricesNearPreviousPrices(t *te
 	}
 }
 
+func TestRegeneratedPricesBiasTowardCurrentGoodAverage(t *testing.T) {
+	g := New(Config{
+		Width:       80,
+		Height:      40,
+		PortCorners: []MapCorner{CornerSW, CornerNE},
+		PortPrices: map[Good]int{
+			GoodRum:     10,
+			GoodSugar:   50,
+			GoodTobacco: 30,
+		},
+		TopRightPortPrices: map[Good]int{
+			GoodRum:     50,
+			GoodSugar:   10,
+			GoodTobacco: 30,
+		},
+	})
+	g.priceRNG = rand.New(rand.NewSource(2))
+	previous := g.ports[0].Prices
+
+	g.regenerateOtherPortPrices(1)
+
+	got := g.ports[0].Prices
+	if got[GoodRum] <= previous[GoodRum] {
+		t.Fatalf("expected low rum price %d to move up toward average, got %d", previous[GoodRum], got[GoodRum])
+	}
+	if got[GoodSugar] >= previous[GoodSugar] {
+		t.Fatalf("expected high sugar price %d to move down toward average, got %d", previous[GoodSugar], got[GoodSugar])
+	}
+	assertRegeneratedNear(t, got, previous)
+}
+
+func TestNearbyPriceBiasesTowardAverageWithinPreviousPriceRange(t *testing.T) {
+	rng := rand.New(rand.NewSource(1))
+	lowPrevious := 10
+	lowNext := nearbyPrice(lowPrevious, 50, rng)
+	if lowNext <= lowPrevious {
+		t.Fatalf("expected price below average to move up from %d, got %d", lowPrevious, lowNext)
+	}
+	if delta := absInt(lowNext - lowPrevious); delta > maxInt(1, lowPrevious/5) {
+		t.Fatalf("expected low price move to stay near previous, previous=%d got=%d", lowPrevious, lowNext)
+	}
+
+	highPrevious := 50
+	highNext := nearbyPrice(highPrevious, 10, rng)
+	if highNext >= highPrevious {
+		t.Fatalf("expected price above average to move down from %d, got %d", highPrevious, highNext)
+	}
+	if delta := absInt(highNext - highPrevious); delta > maxInt(1, highPrevious/5) {
+		t.Fatalf("expected high price move to stay near previous, previous=%d got=%d", highPrevious, highNext)
+	}
+}
+
 func TestReturningToSamePreviousPortDoesNotRegenerateOtherPorts(t *testing.T) {
 	g := New(Config{
 		Width:       80,
@@ -849,6 +950,34 @@ func TestRepairShipAtPortRestoresHitPointsForFixedFee(t *testing.T) {
 	}
 }
 
+func TestRepairCallbackRunsOnlyWhenRepairSucceeds(t *testing.T) {
+	repairs := 0
+	g := New(Config{Width: 40, Height: 20, OnRepair: func() { repairs++ }})
+
+	if paid := g.RepairShip(); paid != 0 {
+		t.Fatalf("expected repair away from port to fail, paid %d", paid)
+	}
+	if repairs != 0 {
+		t.Fatalf("expected failed repair not to call callback, got %d", repairs)
+	}
+
+	dockAtPortRoyal(g)
+	if paid := g.RepairShip(); paid != 0 {
+		t.Fatalf("expected undamaged repair to fail, paid %d", paid)
+	}
+	if repairs != 0 {
+		t.Fatalf("expected undamaged repair not to call callback, got %d", repairs)
+	}
+
+	hitPlayer(g, LoadCannonballs)
+	if paid := g.RepairShip(); paid != shipRepairFee {
+		t.Fatalf("expected successful repair to cost %d, paid %d", shipRepairFee, paid)
+	}
+	if repairs != 1 {
+		t.Fatalf("expected successful repair to call callback once, got %d", repairs)
+	}
+}
+
 func TestRepairShipRequiresPortDamageAndGold(t *testing.T) {
 	g := New(Config{Width: 40, Height: 20})
 	hitPlayer(g, LoadCannonballs)
@@ -901,16 +1030,57 @@ func TestPortsOfferConfiguredOneTimeUpgrades(t *testing.T) {
 	}
 }
 
-func TestPortsOfferRandomValidUpgradesByDefault(t *testing.T) {
+func TestPortsOfferRandomUniqueValidUpgradesByDefault(t *testing.T) {
 	g := New(Config{Width: 80, Height: 40})
+	seen := map[UpgradeKind]string{}
 
 	for _, port := range g.Ports() {
 		if !validUpgrade(port.Upgrade) {
 			t.Fatalf("expected %s to offer a valid upgrade, got %v", port.Name, port.Upgrade)
 		}
+		if otherPort := seen[port.Upgrade]; otherPort != "" {
+			t.Fatalf("expected unique upgrades, both %s and %s offer %v", otherPort, port.Name, port.Upgrade)
+		}
+		seen[port.Upgrade] = port.Name
 		if port.UpgradePurchased {
 			t.Fatalf("expected %s upgrade to start unsold", port.Name)
 		}
+	}
+}
+
+func TestDuplicateConfiguredPortUpgradesAreReassigned(t *testing.T) {
+	g := New(Config{
+		Width:  80,
+		Height: 40,
+		PortUpgrades: map[string]UpgradeKind{
+			"Port Royal": UpgradeHull,
+			"Havana":     UpgradeHull,
+		},
+	})
+
+	ports := g.Ports()
+	if ports[0].Upgrade != UpgradeHull {
+		t.Fatalf("expected first configured hull upgrade to be honored, got %#v", ports[0])
+	}
+	assertNoDuplicateValidUpgrades(t, ports)
+}
+
+func TestPortUpgradeAssignmentUsesNoUpgradeWhenUniqueUpgradesRunOut(t *testing.T) {
+	upgrades := configuredPortUpgrades([]string{"A", "B", "C", "D", "E"}, nil, rand.New(rand.NewSource(1)))
+	seen := map[UpgradeKind]bool{}
+	noneCount := 0
+	for _, upgrade := range upgrades {
+		if upgrade == UpgradeNone {
+			noneCount++
+			continue
+		}
+		if seen[upgrade] {
+			t.Fatalf("expected no duplicate valid upgrades, got %#v", upgrades)
+		}
+		seen[upgrade] = true
+	}
+	if noneCount != 1 {
+		t.Fatalf("expected one port with no upgrade after exhausting four upgrade kinds, got %d in %#v", noneCount, upgrades)
 	}
 }
 
@@ -1036,6 +1206,50 @@ func TestBuyingCannonUpgradeDoesNotReduceEnemyCooldown(t *testing.T) {
 	g.Update(time.Second)
 	if got := len(g.Shots()); got != 2 {
 		t.Fatalf("expected enemy refire after original 3-second cooldown, got %d shots", got)
+	}
+}
+
+func TestBuyingAimLinesUpgradeEnablesCurrentLoadAimLines(t *testing.T) {
+	g := New(Config{
+		Width:        40,
+		Height:       20,
+		StartingGold: upgradeCost,
+		PortUpgrades: map[string]UpgradeKind{
+			"Port Royal": UpgradeAimLines,
+		},
+	})
+	if g.AimLinesEnabled() || len(g.AimLines()) != 0 {
+		t.Fatal("expected aim lines to start disabled")
+	}
+	dockAtPortRoyal(g)
+
+	paid := g.BuyPortUpgrade()
+	if paid != upgradeCost {
+		t.Fatalf("expected upgrade to cost %d, paid %d", upgradeCost, paid)
+	}
+	if !g.AimLinesEnabled() {
+		t.Fatal("expected aim lines upgrade to enable aim lines")
+	}
+
+	lines := g.AimLines()
+	if len(lines) != 2 {
+		t.Fatalf("expected cannonball aim lines for both broadsides, got %d", len(lines))
+	}
+	for _, line := range lines {
+		if line.Load != LoadCannonballs || len(line.Cells) == 0 {
+			t.Fatalf("expected non-empty cannonball aim line, got %#v", line)
+		}
+	}
+
+	g.SelectCannonLoad(LoadGrapeShot)
+	lines = g.AimLines()
+	if len(lines) != 6 {
+		t.Fatalf("expected grape shot aim lines for three pellets on both broadsides, got %d", len(lines))
+	}
+	for _, line := range lines {
+		if line.Load != LoadGrapeShot || len(line.Cells) == 0 {
+			t.Fatalf("expected non-empty grape shot aim line, got %#v", line)
+		}
 	}
 }
 
@@ -1430,7 +1644,8 @@ func TestCannonballHitDamagesEnemyForTwoHitPoints(t *testing.T) {
 }
 
 func TestEnemyIsDestroyedAfterFiveDamage(t *testing.T) {
-	g := New(Config{Width: 40, Height: 20})
+	sunk := 0
+	g := New(Config{Width: 40, Height: 20, OnEnemySunk: func() { sunk++ }})
 
 	hitPrimaryEnemy(g, LoadCannonballs)
 	hitPrimaryEnemy(g, LoadCannonballs)
@@ -1443,6 +1658,9 @@ func TestEnemyIsDestroyedAfterFiveDamage(t *testing.T) {
 	if got := g.Gold(); got != defaultGold {
 		t.Fatalf("expected no gold reward before enemy sinks, got %d", got)
 	}
+	if sunk != 0 {
+		t.Fatalf("expected no sink callback before enemy sinks, got %d", sunk)
+	}
 
 	hitPrimaryEnemy(g, LoadGrapeShot)
 	if _, ok := g.Enemy(); ok {
@@ -1454,13 +1672,17 @@ func TestEnemyIsDestroyedAfterFiveDamage(t *testing.T) {
 	if got := g.Gold(); got != defaultGold+50 {
 		t.Fatalf("expected sinking enemy to award 50 gold, got %d", got)
 	}
+	if sunk != 1 {
+		t.Fatalf("expected sink callback once, got %d", sunk)
+	}
 	if got := len(g.Shots()); got != 0 {
 		t.Fatalf("expected final shot to disappear on hit, got %d shots", got)
 	}
 }
 
 func TestSinkingSpawnedEnemyAwardsGold(t *testing.T) {
-	g := New(Config{Width: 80, Height: 40})
+	sunk := 0
+	g := New(Config{Width: 80, Height: 40, OnEnemySunk: func() { sunk++ }})
 	g.enemyDestroyed = true
 	g.spawnedEnemies = []EnemyShip{{Position: Position{X: 20, Y: 20}, Heading: HeadingN, hitPoints: grapeShotDamage}}
 
@@ -1472,6 +1694,9 @@ func TestSinkingSpawnedEnemyAwardsGold(t *testing.T) {
 	}
 	if got := g.Gold(); got != defaultGold+50 {
 		t.Fatalf("expected sinking spawned enemy to award 50 gold, got %d", got)
+	}
+	if sunk != 1 {
+		t.Fatalf("expected sink callback once for spawned enemy, got %d", sunk)
 	}
 }
 
@@ -1826,10 +2051,97 @@ func hitPlayer(g *Game, load CannonLoad) {
 	g.Update(time.Nanosecond)
 }
 
+func assertNoDuplicateValidUpgrades(t *testing.T, ports []Port) {
+	t.Helper()
+	seen := map[UpgradeKind]string{}
+	for _, port := range ports {
+		if !validUpgrade(port.Upgrade) {
+			continue
+		}
+		if otherPort := seen[port.Upgrade]; otherPort != "" {
+			t.Fatalf("expected unique valid upgrades, both %s and %s offer %v", otherPort, port.Name, port.Upgrade)
+		}
+		seen[port.Upgrade] = port.Name
+	}
+}
+
 func assertPosition(t *testing.T, got Position, wantX, wantY float64) {
 	t.Helper()
 
 	if math.Abs(got.X-wantX) > 0.000001 || math.Abs(got.Y-wantY) > 0.000001 {
 		t.Fatalf("expected position (%.6f, %.6f), got (%.6f, %.6f)", wantX, wantY, got.X, got.Y)
+	}
+}
+
+func TestMuteToggleUpdatesStateAndCallback(t *testing.T) {
+	states := []bool{}
+	g := New(Config{OnMuteChange: func(muted bool) {
+		states = append(states, muted)
+	}})
+
+	if g.Muted() {
+		t.Fatal("expected new game to start unmuted")
+	}
+	if muted := g.ToggleMute(); !muted || !g.Muted() {
+		t.Fatalf("expected first toggle to mute, returned %v and state is %v", muted, g.Muted())
+	}
+	if muted := g.ToggleMute(); muted || g.Muted() {
+		t.Fatalf("expected second toggle to unmute, returned %v and state is %v", muted, g.Muted())
+	}
+	if len(states) != 2 || !states[0] || states[1] {
+		t.Fatalf("expected callbacks for mute then unmute, got %#v", states)
+	}
+}
+
+func TestAddGoldIncreasesGold(t *testing.T) {
+	g := New(Config{})
+
+	g.AddGold(1000)
+	if got := g.Gold(); got != defaultGold+1000 {
+		t.Fatalf("expected gold cheat to add 1000 gold, got %d", got)
+	}
+
+	g.AddGold(-100)
+	if got := g.Gold(); got != defaultGold+1000 {
+		t.Fatalf("expected negative gold addition to do nothing, got %d", got)
+	}
+}
+
+func TestHighScoreStartsFromConfig(t *testing.T) {
+	g := New(Config{HighScore: 250})
+
+	if got := g.HighScore(); got != 250 {
+		t.Fatalf("expected configured high score 250, got %d", got)
+	}
+}
+
+func TestFinalizeScoreSavesCurrentGoldOnceAndUpdatesHighScore(t *testing.T) {
+	calls := 0
+	g := New(Config{
+		HighScore: 90,
+		OnScoreFinalized: func(score int) (int, error) {
+			calls++
+			if score != defaultGold {
+				t.Fatalf("expected current gold score %d, got %d", defaultGold, score)
+			}
+			return score, nil
+		},
+	})
+
+	if err := g.FinalizeScore(); err != nil {
+		t.Fatalf("finalize score: %v", err)
+	}
+	if !g.ScoreFinalized() {
+		t.Fatal("expected score to be marked finalized")
+	}
+	if got := g.HighScore(); got != defaultGold {
+		t.Fatalf("expected high score to update to %d, got %d", defaultGold, got)
+	}
+
+	if err := g.FinalizeScore(); err != nil {
+		t.Fatalf("second finalize score: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected score finalizer to run once, got %d calls", calls)
 	}
 }

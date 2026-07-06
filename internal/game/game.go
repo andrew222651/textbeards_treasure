@@ -106,6 +106,7 @@ const (
 	UpgradeHull
 	UpgradeCannons
 	UpgradeCargo
+	UpgradeAimLines
 )
 
 func UpgradeName(upgrade UpgradeKind) string {
@@ -116,6 +117,8 @@ func UpgradeName(upgrade UpgradeKind) string {
 		return "Cannons -1s"
 	case UpgradeCargo:
 		return "Cargo +5"
+	case UpgradeAimLines:
+		return "Aim Lines"
 	default:
 		return "No Upgrade"
 	}
@@ -174,9 +177,16 @@ type Config struct {
 	IslandPortPrices   map[Good]int
 	PortUpgrades       map[string]UpgradeKind
 	PortCorners        []MapCorner
+	StartingGold       int
+	HighScore          int
 	OnMove             func(Position)
 	OnCannonFire       func()
+	OnEnemySunk        func()
+	OnTrade            func()
+	OnRepair           func()
 	OnPortStateChange  func(bool)
+	OnMuteChange       func(bool)
+	OnScoreFinalized   func(score int) (highScore int, err error)
 }
 
 type Position struct {
@@ -191,6 +201,12 @@ type Shot struct {
 	Owner     ShotOwner
 	Range     float64
 	remainder float64
+}
+
+type AimLine struct {
+	Cells   []Position
+	Heading Heading
+	Load    CannonLoad
 }
 
 type Game struct {
@@ -233,13 +249,22 @@ type Game struct {
 	dockedPort                  int
 	priceRNG                    *rand.Rand
 	gold                        int
+	highScore                   int
+	scoreFinalized              bool
 	inventory                   [goodCount]int
 	cargoCapacity               int
+	aimLinesEnabled             bool
 	selectedTradeGood           Good
 	tradeQuantity               int
 	onMove                      func(Position)
 	onCannonFire                func()
+	onEnemySunk                 func()
+	muted                       bool
+	onTrade                     func()
+	onRepair                    func()
 	onPortStateChange           func(bool)
+	onMuteChange                func(bool)
+	onScoreFinalized            func(score int) (highScore int, err error)
 }
 
 func New(config Config) *Game {
@@ -276,6 +301,9 @@ func New(config Config) *Game {
 	if config.CannonRange <= 0 {
 		config.CannonRange = defaultShotRange(config.EnemyAggroRange)
 	}
+	if config.StartingGold <= 0 {
+		config.StartingGold = defaultGold
+	}
 	config.CannonRange = capShotRange(config.CannonRange, config.EnemyAggroRange)
 	priceRNG := rand.New(rand.NewSource(time.Now().UnixNano()))
 	enemySpawnRNG := rand.New(rand.NewSource(time.Now().UnixNano() + 1))
@@ -285,10 +313,12 @@ func New(config Config) *Game {
 	applyPortPrices(havanaPrices[:], config.TopRightPortPrices)
 	tortugaPrices := randomPortPrices(priceRNG)
 	applyPortPrices(tortugaPrices[:], config.IslandPortPrices)
-	portRoyalUpgrade := configuredPortUpgrade("Port Royal", config.PortUpgrades, priceRNG)
-	havanaUpgrade := configuredPortUpgrade("Havana", config.PortUpgrades, priceRNG)
-	tortugaUpgrade := configuredPortUpgrade("Tortuga", config.PortUpgrades, priceRNG)
 	islands := defaultIslands(config.Width, config.Height, priceRNG)
+	portNames := []string{"Port Royal", "Havana"}
+	if len(islands) > 0 {
+		portNames = append(portNames, "Tortuga")
+	}
+	portUpgrades := configuredPortUpgrades(portNames, config.PortUpgrades, priceRNG)
 	corners := configuredPortCorners(config.PortCorners, priceRNG)
 	ship := defaultPlayerPosition(config.Width, config.Height, islands)
 
@@ -325,32 +355,38 @@ func New(config Config) *Game {
 				Name:     "Port Royal",
 				Position: cornerPortPosition(corners[0], config.Width, config.Height),
 				Prices:   portRoyalPrices,
-				Upgrade:  portRoyalUpgrade,
+				Upgrade:  portUpgrades[0],
 				Corner:   corners[0],
 			},
 			{
 				Name:     "Havana",
 				Position: cornerPortPosition(corners[1], config.Width, config.Height),
 				Prices:   havanaPrices,
-				Upgrade:  havanaUpgrade,
+				Upgrade:  portUpgrades[1],
 				Corner:   corners[1],
 			},
 		},
 		islands:           islands,
-		gold:              defaultGold,
+		gold:              config.StartingGold,
+		highScore:         maxInt(0, config.HighScore),
 		cargoCapacity:     defaultCargoCapacity,
 		selectedTradeGood: GoodRum,
 		tradeQuantity:     1,
 		onMove:            config.OnMove,
 		onCannonFire:      config.OnCannonFire,
+		onEnemySunk:       config.OnEnemySunk,
+		onTrade:           config.OnTrade,
+		onRepair:          config.OnRepair,
 		onPortStateChange: config.OnPortStateChange,
+		onMuteChange:      config.OnMuteChange,
+		onScoreFinalized:  config.OnScoreFinalized,
 	}
 	if len(islands) > 0 {
 		g.ports = append(g.ports, Port{
 			Name:     "Tortuga",
 			Position: islandPortPosition(islands[0], config.Width, config.Height),
 			Prices:   tortugaPrices,
-			Upgrade:  tortugaUpgrade,
+			Upgrade:  portUpgrades[2],
 			OnIsland: true,
 		})
 	}
@@ -443,6 +479,53 @@ func (g *Game) Shots() []Shot {
 	return shots
 }
 
+func (g *Game) AimLines() []AimLine {
+	if !g.aimLinesEnabled || g.cannonRange <= 0 {
+		return nil
+	}
+
+	var lines []AimLine
+	for _, side := range []CannonSide{CannonLeft, CannonRight} {
+		lines = append(lines, g.aimLinesForSide(side)...)
+	}
+	return lines
+}
+
+func (g *Game) AimLinesEnabled() bool {
+	return g.aimLinesEnabled
+}
+
+func (g *Game) aimLinesForSide(side CannonSide) []AimLine {
+	shotHeading := cannonHeading(g.heading, side)
+	base := cannonMouthPosition(g.ship, shotHeading)
+	switch g.cannonLoad {
+	case LoadCannonballs:
+		return []AimLine{g.aimLineFrom(base, shotHeading, LoadCannonballs)}
+	case LoadGrapeShot:
+		return []AimLine{
+			g.aimLineFrom(spreadShotPosition(base, rotatedHeading(shotHeading, -1)), rotatedHeading(shotHeading, -1), LoadGrapeShot),
+			g.aimLineFrom(spreadShotPosition(base, shotHeading), shotHeading, LoadGrapeShot),
+			g.aimLineFrom(spreadShotPosition(base, rotatedHeading(shotHeading, 1)), rotatedHeading(shotHeading, 1), LoadGrapeShot),
+		}
+	default:
+		return nil
+	}
+}
+
+func (g *Game) aimLineFrom(position Position, heading Heading, load CannonLoad) AimLine {
+	dx, dy := headingStep(heading)
+	line := AimLine{Heading: heading, Load: load}
+	for remaining := g.cannonRange; remaining > 0; remaining-- {
+		if !g.inBounds(position) || g.positionInIsland(position) {
+			break
+		}
+		line.Cells = append(line.Cells, position)
+		position.X += float64(dx)
+		position.Y += float64(dy)
+	}
+	return line
+}
+
 func (g *Game) Enemy() (EnemyShip, bool) {
 	if !g.enemyDestroyed {
 		return g.enemy, true
@@ -472,6 +555,18 @@ func (g *Game) SetViewport(width, height int) {
 
 func (g *Game) GameOver() bool {
 	return g.gameOver
+}
+
+func (g *Game) ToggleMute() bool {
+	g.muted = !g.muted
+	if g.onMuteChange != nil {
+		g.onMuteChange(g.muted)
+	}
+	return g.muted
+}
+
+func (g *Game) Muted() bool {
+	return g.muted
 }
 
 func (g *Game) PlayerHitPoints() int {
@@ -547,6 +642,43 @@ func (g *Game) shipTouchesPort(port Port) bool {
 
 func (g *Game) Gold() int {
 	return g.gold
+}
+
+func (g *Game) AddGold(amount int) {
+	if g.gameOver || amount <= 0 {
+		return
+	}
+	g.gold += amount
+}
+
+func (g *Game) HighScore() int {
+	return maxInt(0, g.highScore)
+}
+
+func (g *Game) SetHighScore(score int) {
+	g.highScore = maxInt(0, score)
+}
+
+func (g *Game) FinalizeScore() error {
+	if g.scoreFinalized {
+		return nil
+	}
+
+	if g.onScoreFinalized != nil {
+		highScore, err := g.onScoreFinalized(g.Gold())
+		if err != nil {
+			return err
+		}
+		g.SetHighScore(highScore)
+	} else if g.gold > g.highScore {
+		g.highScore = g.gold
+	}
+	g.scoreFinalized = true
+	return nil
+}
+
+func (g *Game) ScoreFinalized() bool {
+	return g.scoreFinalized
 }
 
 func (g *Game) CargoCapacity() int {
@@ -627,6 +759,9 @@ func (g *Game) RepairShip() int {
 
 	g.gold -= shipRepairFee
 	g.playerHitPoints = g.maxShipHitPoints
+	if g.onRepair != nil {
+		g.onRepair()
+	}
 	return shipRepairFee
 }
 
@@ -662,6 +797,8 @@ func (g *Game) applyUpgrade(upgrade UpgradeKind) {
 		}
 	case UpgradeCargo:
 		g.cargoCapacity += cargoUpgradeCapacity
+	case UpgradeAimLines:
+		g.aimLinesEnabled = true
 	}
 }
 
@@ -685,6 +822,9 @@ func (g *Game) Buy(good Good, quantity int) int {
 
 	g.gold -= bought * price
 	g.inventory[good] += bought
+	if g.onTrade != nil {
+		g.onTrade()
+	}
 	return bought
 }
 
@@ -701,6 +841,9 @@ func (g *Game) Sell(good Good, quantity int) int {
 
 	g.inventory[good] -= sold
 	g.gold += sold * port.Prices[good]
+	if g.onTrade != nil {
+		g.onTrade()
+	}
 	return sold
 }
 
@@ -1185,12 +1328,29 @@ func (g *Game) updatePortVisit() {
 }
 
 func (g *Game) regenerateOtherPortPrices(currentPort int) {
+	averages := g.averagePortPrices()
 	for i := range g.ports {
 		if i == currentPort {
 			continue
 		}
-		g.ports[i].Prices = nearbyPortPrices(g.ports[i].Prices, g.priceRNG)
+		g.ports[i].Prices = nearbyPortPrices(g.ports[i].Prices, averages, g.priceRNG)
 	}
+}
+
+func (g *Game) averagePortPrices() [goodCount]int {
+	var averages [goodCount]int
+	if len(g.ports) == 0 {
+		return averages
+	}
+
+	for _, good := range Goods() {
+		sum := 0
+		for _, port := range g.ports {
+			sum += port.Prices[good]
+		}
+		averages[good] = int(math.Round(float64(sum) / float64(len(g.ports))))
+	}
+	return averages
 }
 
 func (g *Game) stepAlongHeading(throttle int, steps int) {
@@ -1257,8 +1417,12 @@ func cannonHeading(shipHeading Heading, side CannonSide) Heading {
 }
 
 func (g *Game) addSpreadShot(base Position, heading Heading, owner ShotOwner) {
+	g.addShot(spreadShotPosition(base, heading), heading, LoadGrapeShot, owner)
+}
+
+func spreadShotPosition(base Position, heading Heading) Position {
 	dx, dy := headingStep(heading)
-	g.addShot(Position{X: base.X + float64(dx), Y: base.Y + float64(dy)}, heading, LoadGrapeShot, owner)
+	return Position{X: base.X + float64(dx), Y: base.Y + float64(dy)}
 }
 
 func (g *Game) addShot(position Position, heading Heading, load CannonLoad, owner ShotOwner) {
@@ -1345,6 +1509,9 @@ func (g *Game) applySpawnedEnemyDamage(index int, load CannonLoad) {
 
 func (g *Game) awardEnemySunkReward() {
 	g.gold += enemySunkReward
+	if g.onEnemySunk != nil {
+		g.onEnemySunk()
+	}
 }
 
 func (g *Game) removeSpawnedEnemy(index int) {
@@ -1714,27 +1881,50 @@ func validMapCorner(corner MapCorner) bool {
 	return corner == CornerNW || corner == CornerNE || corner == CornerSE || corner == CornerSW
 }
 
-func randomPortUpgrade(rng *rand.Rand) UpgradeKind {
+func configuredPortUpgrades(portNames []string, configured map[string]UpgradeKind, rng *rand.Rand) []UpgradeKind {
 	rng = ensureRNG(rng)
-	switch rng.Intn(3) {
-	case 0:
-		return UpgradeHull
-	case 1:
-		return UpgradeCannons
-	default:
-		return UpgradeCargo
+	upgrades := make([]UpgradeKind, len(portNames))
+	used := make(map[UpgradeKind]bool)
+
+	for i, portName := range portNames {
+		upgrade, ok := configured[portName]
+		if !ok || !validUpgrade(upgrade) || used[upgrade] {
+			continue
+		}
+		upgrades[i] = upgrade
+		used[upgrade] = true
 	}
+
+	for i := range upgrades {
+		if validUpgrade(upgrades[i]) {
+			continue
+		}
+		upgrades[i] = randomUnusedPortUpgrade(used, rng)
+	}
+	return upgrades
 }
 
-func configuredPortUpgrade(portName string, configured map[string]UpgradeKind, rng *rand.Rand) UpgradeKind {
-	if upgrade, ok := configured[portName]; ok && validUpgrade(upgrade) {
-		return upgrade
+func randomUnusedPortUpgrade(used map[UpgradeKind]bool, rng *rand.Rand) UpgradeKind {
+	choices := make([]UpgradeKind, 0, len(portUpgradeKinds()))
+	for _, upgrade := range portUpgradeKinds() {
+		if !used[upgrade] {
+			choices = append(choices, upgrade)
+		}
 	}
-	return randomPortUpgrade(rng)
+	if len(choices) == 0 {
+		return UpgradeNone
+	}
+	upgrade := choices[rng.Intn(len(choices))]
+	used[upgrade] = true
+	return upgrade
+}
+
+func portUpgradeKinds() []UpgradeKind {
+	return []UpgradeKind{UpgradeHull, UpgradeCannons, UpgradeCargo, UpgradeAimLines}
 }
 
 func validUpgrade(upgrade UpgradeKind) bool {
-	return upgrade == UpgradeHull || upgrade == UpgradeCannons || upgrade == UpgradeCargo
+	return upgrade == UpgradeHull || upgrade == UpgradeCannons || upgrade == UpgradeCargo || upgrade == UpgradeAimLines
 }
 
 func randomPortPrices(rng *rand.Rand) [goodCount]int {
@@ -1746,36 +1936,64 @@ func randomPortPrices(rng *rand.Rand) [goodCount]int {
 	}
 }
 
-func nearbyPortPrices(previous [goodCount]int, rng *rand.Rand) [goodCount]int {
+func nearbyPortPrices(previous [goodCount]int, averages [goodCount]int, rng *rand.Rand) [goodCount]int {
 	rng = ensureRNG(rng)
 	next := previous
 	for _, good := range Goods() {
-		next[good] = nearbyPrice(previous[good], rng)
+		next[good] = nearbyPrice(previous[good], averages[good], rng)
 	}
 	return next
 }
 
-func nearbyPrice(previous int, rng *rand.Rand) int {
+func nearbyPrice(previous int, average int, rng *rand.Rand) int {
 	if previous <= 0 {
 		return 1
 	}
 	maxDelta := maxInt(1, previous/5)
-	delta := rng.Intn(maxDelta*2+1) - maxDelta
+	bias := marketBiasDelta(previous, average, maxDelta)
+	randomWindow := maxInt(1, maxDelta/2)
+	delta := bias + rng.Intn(randomWindow*2+1) - randomWindow
+	delta = clampInt(delta, -maxDelta, maxDelta)
 	if delta == 0 {
-		if rng.Intn(2) == 0 {
-			delta = -1
-		} else {
-			delta = 1
-		}
+		delta = fallbackPriceDelta(previous, average, rng)
 	}
 	next := previous + delta
 	if next < 1 {
 		next = 1
 	}
 	if next == previous {
-		next++
+		next += fallbackPriceDelta(previous, average, rng)
+		if next < 1 {
+			next = 1
+		}
 	}
 	return next
+}
+
+func marketBiasDelta(previous int, average int, maxDelta int) int {
+	distance := average - previous
+	if distance == 0 {
+		return 0
+	}
+	magnitude := maxInt(1, absInt(distance)/4)
+	magnitude = minInt(magnitude, maxDelta)
+	if distance < 0 {
+		return -magnitude
+	}
+	return magnitude
+}
+
+func fallbackPriceDelta(previous int, average int, rng *rand.Rand) int {
+	if average > previous {
+		return 1
+	}
+	if average < previous {
+		return -1
+	}
+	if rng.Intn(2) == 0 {
+		return -1
+	}
+	return 1
 }
 
 func ensureRNG(rng *rand.Rand) *rand.Rand {

@@ -8,7 +8,6 @@ Control a pirate ship with `W`, `A`, `S`, and `D`.
 - `S`: move backward opposite the current heading at half forward speed
 - `A`: rotate the ship left by 45 degrees
 - `D`: rotate the ship right by 45 degrees
-- If no movement keys are pressed, the ship stays still.
 - `1`: select cannonballs, or select rum while in port
 - `2`: select grape shot, or select sugar while in port
 - `3`: select tobacco while in port
@@ -17,8 +16,9 @@ Control a pirate ship with `W`, `A`, `S`, and `D`.
 - `[` / `]`: decrease / increase port trade quantity while in port
 - `B`: buy the selected good and quantity while in port
 - `X`: sell the selected good and quantity while in port
-- `R`: repair the ship to full hit points while in port for 25 gold
-- `U`: buy the port's one-time ship upgrade while in port for 1000 gold
+- `R`: repair the ship to full hit points while in port
+- `U`: buy the port's one-time ship upgrade while in port
+- `M`: mute or unmute all sound and music
 
 
 Music by Matthew Pablo
@@ -30,12 +30,16 @@ Music by Matthew Pablo
 go run ./cmd/pirates
 ```
 
-Press `Esc` or `Ctrl-C` to quit.
+Press `Esc` or `Ctrl-C` to quit. When the game ends, the current gold count is
+saved as the high score if it is a new record.
+
+High scores are stored in a SQLite database at `PIRATES_SCORE_DB` when that
+environment variable is set, or in the user's config directory by default.
 
 Music playback is best-effort through the first available seek-capable local
-audio command: `ffplay`, `mpv`, or `play`. Cannon fire sounds can also use
-`pw-play`, `paplay`, `ogg123`, `aplay`, or `canberra-gtk-play`. If none is
-installed, the game continues silently.
+audio command: `ffplay`, `mpv`, or `play`. Cannon fire, trade, and repair
+sounds can also use `pw-play`, `paplay`, `ogg123`, `aplay`, or
+`canberra-gtk-play`. If none is installed, the game continues silently.
 
 
 ## Terminal support

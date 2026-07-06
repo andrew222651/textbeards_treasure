@@ -99,6 +99,7 @@ func TestRenderShowsGoldInventoryAndPort(t *testing.T) {
 	g := game.New(game.Config{
 		Width:       30,
 		Height:      10,
+		HighScore:   250,
 		PortCorners: []game.MapCorner{game.CornerSW, game.CornerNE},
 		PortPrices: map[game.Good]int{
 			game.GoodRum: 10,
@@ -106,8 +107,8 @@ func TestRenderShowsGoldInventoryAndPort(t *testing.T) {
 	})
 
 	frame := Render(g, 30, 10)
-	if !strings.Contains(frame, "Gold: 100") || !strings.Contains(frame, "HP: 5/5") || !strings.Contains(frame, "Cargo: 0/10") {
-		t.Fatalf("expected gold, HP, and cargo status, got %q", frame)
+	if !strings.Contains(frame, "Gold: 100") || !strings.Contains(frame, "High: 250") || !strings.Contains(frame, "HP: 5/5") || !strings.Contains(frame, "Cargo: 0/10") {
+		t.Fatalf("expected gold, high score, HP, and cargo status, got %q", frame)
 	}
 	if !strings.Contains(frame, "Rum: 0") || !strings.Contains(frame, "Sugar: 0") || !strings.Contains(frame, "Tobacco: 0") {
 		t.Fatalf("expected inventory status, got %q", frame)
@@ -223,6 +224,33 @@ func TestRenderShowsGameOverWhenPlayerIsDestroyed(t *testing.T) {
 	frame := Render(g, 40, 12)
 	if !strings.Contains(frame, "GAME OVER") {
 		t.Fatalf("expected game-over message, got %q", frame)
+	}
+}
+
+func TestRenderDrawsAimLinesAfterUpgrade(t *testing.T) {
+	g := game.New(game.Config{
+		Width:        60,
+		Height:       20,
+		CannonRange:  5,
+		StartingGold: 1000,
+		PortCorners:  []game.MapCorner{game.CornerSW, game.CornerNE},
+		PortUpgrades: map[string]game.UpgradeKind{
+			"Port Royal": game.UpgradeAimLines,
+		},
+	})
+	sailToPort(t, g)
+
+	before := stripANSI(Render(g, 60, 20))
+	if strings.Contains(before, ".") {
+		t.Fatalf("expected no aim line glyphs before upgrade purchase, got %q", before)
+	}
+	if paid := g.BuyPortUpgrade(); paid != g.UpgradeCost() {
+		t.Fatalf("expected aim line upgrade purchase to cost %d, paid %d", g.UpgradeCost(), paid)
+	}
+
+	after := stripANSI(Render(g, 60, 20))
+	if !strings.Contains(after, ".") {
+		t.Fatalf("expected aim line glyphs after upgrade purchase, got %q", after)
 	}
 }
 

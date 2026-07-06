@@ -12,12 +12,15 @@ import (
 
 const (
 	cannonFireAsset       = "assets/cannon_fire.ogg"
+	repairAsset           = "assets/craft.ogg"
+	tradeAsset            = "assets/gold_sack.wav"
+	splashAsset           = "assets/splash.ogg"
 	defaultMusicAsset     = "assets/default_music.wav"
 	tavernMusicAsset      = "assets/tavern.ogg"
 	musicCrossfadeOverlap = 500 * time.Millisecond
 )
 
-//go:embed assets/cannon_fire.ogg assets/default_music.wav assets/tavern.ogg
+//go:embed assets/cannon_fire.ogg assets/craft.ogg assets/gold_sack.wav assets/splash.ogg assets/default_music.wav assets/tavern.ogg
 var embeddedAssets embed.FS
 
 type playerCommand struct {
@@ -47,6 +50,7 @@ type CannonFirePlayer struct {
 	path        string
 	prepareErr  error
 	command     *playerCommand
+	muted       func() bool
 }
 
 func NewCannonFirePlayer() *CannonFirePlayer {
@@ -54,7 +58,7 @@ func NewCannonFirePlayer() *CannonFirePlayer {
 }
 
 func (p *CannonFirePlayer) Play() {
-	if p == nil {
+	if p == nil || p.isMuted() {
 		return
 	}
 	path, ok := p.soundPath()
@@ -71,6 +75,17 @@ func (p *CannonFirePlayer) Play() {
 		return
 	}
 	go func() { _ = cmd.Wait() }()
+}
+
+func (p *CannonFirePlayer) SetMutedFunc(muted func() bool) {
+	if p == nil {
+		return
+	}
+	p.muted = muted
+}
+
+func (p *CannonFirePlayer) isMuted() bool {
+	return p.muted != nil && p.muted()
 }
 
 func (p *CannonFirePlayer) Close() error {
@@ -103,6 +118,277 @@ func (p *CannonFirePlayer) playCommand() (playerCommand, bool) {
 	return *p.command, true
 }
 
+// RepairPlayer plays the embedded repair sound through the first available
+// local audio command. Missing audio tools are treated as a silent no-op.
+type RepairPlayer struct {
+	prepareOnce sync.Once
+	commandOnce sync.Once
+	path        string
+	prepareErr  error
+	command     *playerCommand
+	muted       func() bool
+}
+
+func NewRepairPlayer() *RepairPlayer {
+	return &RepairPlayer{}
+}
+
+func (p *RepairPlayer) Play() {
+	if p == nil || p.isMuted() {
+		return
+	}
+	path, ok := p.soundPath()
+	if !ok {
+		return
+	}
+	command, ok := p.playCommand()
+	if !ok {
+		return
+	}
+
+	cmd := exec.Command(command.name, command.argsFor(path, 0)...)
+	if err := cmd.Start(); err != nil {
+		return
+	}
+	go func() { _ = cmd.Wait() }()
+}
+
+func (p *RepairPlayer) SetMutedFunc(muted func() bool) {
+	if p == nil {
+		return
+	}
+	p.muted = muted
+}
+
+func (p *RepairPlayer) isMuted() bool {
+	return p.muted != nil && p.muted()
+}
+
+func (p *RepairPlayer) Close() error {
+	if p == nil || p.path == "" {
+		return nil
+	}
+	return os.Remove(p.path)
+}
+
+func (p *RepairPlayer) soundPath() (string, bool) {
+	p.prepareOnce.Do(func() {
+		p.path, p.prepareErr = writeEmbeddedAsset(repairAsset, "pirates-repair-*.ogg")
+	})
+	return p.path, p.prepareErr == nil && p.path != ""
+}
+
+func (p *RepairPlayer) playCommand() (playerCommand, bool) {
+	p.commandOnce.Do(func() {
+		for _, command := range cannonFireCommands() {
+			if _, err := exec.LookPath(command.name); err == nil {
+				selected := command
+				p.command = &selected
+				return
+			}
+		}
+	})
+	if p.command == nil {
+		return playerCommand{}, false
+	}
+	return *p.command, true
+}
+
+// TradePlayer plays the embedded trade sound through the first available local
+// audio command. Missing audio tools are treated as a silent no-op.
+type TradePlayer struct {
+	prepareOnce sync.Once
+	commandOnce sync.Once
+	path        string
+	prepareErr  error
+	command     *playerCommand
+	muted       func() bool
+}
+
+func NewTradePlayer() *TradePlayer {
+	return &TradePlayer{}
+}
+
+func (p *TradePlayer) Play() {
+	if p == nil || p.isMuted() {
+		return
+	}
+	path, ok := p.soundPath()
+	if !ok {
+		return
+	}
+	command, ok := p.playCommand()
+	if !ok {
+		return
+	}
+
+	cmd := exec.Command(command.name, command.argsFor(path, 0)...)
+	if err := cmd.Start(); err != nil {
+		return
+	}
+	go func() { _ = cmd.Wait() }()
+}
+
+func (p *TradePlayer) SetMutedFunc(muted func() bool) {
+	if p == nil {
+		return
+	}
+	p.muted = muted
+}
+
+func (p *TradePlayer) isMuted() bool {
+	return p.muted != nil && p.muted()
+}
+
+func (p *TradePlayer) Close() error {
+	if p == nil || p.path == "" {
+		return nil
+	}
+	return os.Remove(p.path)
+}
+
+func (p *TradePlayer) soundPath() (string, bool) {
+	p.prepareOnce.Do(func() {
+		p.path, p.prepareErr = writeEmbeddedAsset(tradeAsset, "pirates-trade-*.wav")
+	})
+	return p.path, p.prepareErr == nil && p.path != ""
+}
+
+func (p *TradePlayer) playCommand() (playerCommand, bool) {
+	p.commandOnce.Do(func() {
+		for _, command := range cannonFireCommands() {
+			if _, err := exec.LookPath(command.name); err == nil {
+				selected := command
+				p.command = &selected
+				return
+			}
+		}
+	})
+	if p.command == nil {
+		return playerCommand{}, false
+	}
+	return *p.command, true
+}
+
+// SplashPlayer plays the embedded ship-sinking splash sound through the first
+// available local audio command. Missing audio tools are treated as a silent
+// no-op.
+type SplashPlayer struct {
+	prepareOnce sync.Once
+	commandOnce sync.Once
+	path        string
+	prepareErr  error
+	command     *playerCommand
+	muted       func() bool
+}
+
+func NewSplashPlayer() *SplashPlayer {
+	return &SplashPlayer{}
+}
+
+func (p *SplashPlayer) Play() {
+	if p == nil || p.isMuted() {
+		return
+	}
+	path, ok := p.soundPath()
+	if !ok {
+		return
+	}
+	command, ok := p.playCommand()
+	if !ok {
+		return
+	}
+
+	cmd := exec.Command(command.name, command.argsFor(path, 0)...)
+	if err := cmd.Start(); err != nil {
+		return
+	}
+	go func() { _ = cmd.Wait() }()
+}
+
+func (p *SplashPlayer) SetMutedFunc(muted func() bool) {
+	if p == nil {
+		return
+	}
+	p.muted = muted
+}
+
+func (p *SplashPlayer) isMuted() bool {
+	return p.muted != nil && p.muted()
+}
+
+func (p *SplashPlayer) Close() error {
+	if p == nil || p.path == "" {
+		return nil
+	}
+	return os.Remove(p.path)
+}
+
+func (p *SplashPlayer) soundPath() (string, bool) {
+	p.prepareOnce.Do(func() {
+		p.path, p.prepareErr = writeEmbeddedAsset(splashAsset, "pirates-splash-*.ogg")
+	})
+	return p.path, p.prepareErr == nil && p.path != ""
+}
+
+func (p *SplashPlayer) playCommand() (playerCommand, bool) {
+	p.commandOnce.Do(func() {
+		for _, command := range cannonFireCommands() {
+			if _, err := exec.LookPath(command.name); err == nil {
+				selected := command
+				p.command = &selected
+				return
+			}
+		}
+	})
+	if p.command == nil {
+		return playerCommand{}, false
+	}
+	return *p.command, true
+}
+
+type MuteController struct {
+	mu    sync.Mutex
+	muted bool
+	music *MusicPlayer
+}
+
+func NewMuteController(music *MusicPlayer) *MuteController {
+	return &MuteController{music: music}
+}
+
+func (m *MuteController) SetMuted(muted bool) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	if m.muted == muted {
+		m.mu.Unlock()
+		return
+	}
+	m.muted = muted
+	music := m.music
+	m.mu.Unlock()
+
+	if music == nil {
+		return
+	}
+	if muted {
+		music.Pause()
+		return
+	}
+	music.Resume()
+}
+
+func (m *MuteController) Muted() bool {
+	if m == nil {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.muted
+}
+
 type musicTrack int
 
 const (
@@ -133,6 +419,9 @@ type MusicPlayer struct {
 	command     *playerCommand
 	current     *musicLoop
 	active      map[*musicLoop]struct{}
+	target      musicTrack
+	hasTarget   bool
+	paused      bool
 	stopped     bool
 }
 
@@ -187,16 +476,64 @@ func (p *MusicPlayer) Stop() {
 	})
 }
 
+func (p *MusicPlayer) Pause() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	if p.stopped || p.paused {
+		p.mu.Unlock()
+		return
+	}
+	p.paused = true
+	loops := make([]*musicLoop, 0, len(p.active))
+	for loop := range p.active {
+		loops = append(loops, loop)
+	}
+	p.current = nil
+	p.mu.Unlock()
+
+	for _, loop := range loops {
+		stopMusicLoop(loop)
+	}
+}
+
+func (p *MusicPlayer) Resume() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	if p.stopped || !p.paused {
+		p.mu.Unlock()
+		return
+	}
+	p.paused = false
+	target := defaultMusicTrack
+	if p.hasTarget {
+		target = p.target
+	}
+	p.mu.Unlock()
+
+	p.switchTo(target)
+}
+
 func (p *MusicPlayer) switchTo(track musicTrack) {
 	if p == nil {
 		return
 	}
 	p.mu.Lock()
-	stopped := p.stopped
-	p.mu.Unlock()
-	if stopped {
+	if p.stopped {
+		p.mu.Unlock()
 		return
 	}
+	p.target = track
+	p.hasTarget = true
+	if p.paused || (p.current != nil && p.current.track == track) {
+		p.mu.Unlock()
+		return
+	}
+	p.mu.Unlock()
+
 	path, ok := p.musicPath(track)
 	if !ok {
 		return
@@ -210,7 +547,7 @@ func (p *MusicPlayer) switchTo(track musicTrack) {
 	loop := &musicLoop{track: track, cancel: cancel, done: make(chan struct{})}
 
 	p.mu.Lock()
-	if p.stopped {
+	if p.stopped || p.paused || p.target != track {
 		p.mu.Unlock()
 		cancel()
 		return

@@ -21,6 +21,7 @@ const (
 	enemySideGlyph  byte = 45
 	cannonballGlyph byte = 64
 	grapeShotGlyph  byte = 42
+	aimLineGlyph    byte = 46
 	statusRows      int  = 3
 	ansiReset            = "\x1b[0m"
 )
@@ -37,6 +38,7 @@ const (
 	styleEnemyShip
 	styleCannonball
 	styleGrapeShot
+	styleAimLine
 	styleStatus
 	styleMenu
 	styleGameOver
@@ -73,6 +75,7 @@ func Render(g *game.Game, width, height int) string {
 		}
 	}
 
+	drawAimLines(rows, styles, cam, g.AimLines())
 	drawMapEdges(rows, styles, cam, g.Width(), g.Height())
 	drawIslands(rows, styles, cam, g)
 	for _, port := range g.Ports() {
@@ -143,7 +146,7 @@ func drawStatus(rows [][]byte, styles [][]cellStyle, g *game.Game) {
 	if g.CannonLoad() == game.LoadGrapeShot {
 		loadLabel = "Load: 2 Grape Shot"
 	}
-	drawText(rows, styles, 0, 0, fmt.Sprintf("Gold: %d  HP: %d/%d", g.Gold(), g.PlayerHitPoints(), g.MaxShipHitPoints()), styleStatus)
+	drawText(rows, styles, 0, 0, fmt.Sprintf("Gold: %d  High: %d  HP: %d/%d", g.Gold(), g.HighScore(), g.PlayerHitPoints(), g.MaxShipHitPoints()), styleStatus)
 	drawText(rows, styles, 0, 1, fmt.Sprintf("Cargo: %d/%d  %s", g.CargoUsed(), g.CargoCapacity(), loadLabel), styleStatus)
 	drawText(rows, styles, 0, 2, fmt.Sprintf("Rum: %d  Sugar: %d  Tobacco: %d", g.InventoryFor(game.GoodRum), g.InventoryFor(game.GoodSugar), g.InventoryFor(game.GoodTobacco)), styleStatus)
 }
@@ -169,6 +172,9 @@ func drawGameOver(rows [][]byte, styles [][]cellStyle) {
 func portMenuTitle(port game.Port, upgradeCost int) string {
 	if port.UpgradePurchased {
 		return port.Name + " Market  Upgrade sold"
+	}
+	if port.Upgrade == game.UpgradeNone {
+		return port.Name + " Market  No upgrade"
 	}
 	return fmt.Sprintf("%s Market  U %s %dg", port.Name, game.UpgradeName(port.Upgrade), upgradeCost)
 }
@@ -197,6 +203,16 @@ func drawPortMenu(rows [][]byte, styles [][]cellStyle, g *game.Game) {
 	}
 	for i, line := range lines {
 		drawText(rows, styles, 0, startY+i, line, styleMenu)
+	}
+}
+
+func drawAimLines(rows [][]byte, styles [][]cellStyle, cam camera, lines []game.AimLine) {
+	for _, line := range lines {
+		for _, cell := range line.Cells {
+			x := int(math.Round(cell.X)) - cam.x
+			y := int(math.Round(cell.Y)) - cam.y
+			setCell(rows, styles, x, y, aimLineGlyph, styleAimLine)
+		}
 	}
 }
 
@@ -350,6 +366,8 @@ func ansiForStyle(style cellStyle) string {
 		return "\x1b[93m"
 	case styleGrapeShot:
 		return "\x1b[35m"
+	case styleAimLine:
+		return "\x1b[37m"
 	case styleStatus:
 		return "\x1b[36m"
 	case styleMenu:

@@ -12,6 +12,7 @@ import (
 const (
 	frameInterval       = time.Second / 60
 	legacyNudgeDuration = 100 * time.Millisecond
+	goldCheatAmount     = 1000
 	keyboardModeEnable  = "\x1b[>10u"
 	keyboardModeDisable = "\x1b[<u"
 	enterScreen         = "\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[2J"
@@ -51,14 +52,16 @@ func Run(g *game.Game) error {
 
 			for _, event := range parser.Feed(buf[:n]) {
 				if handleEvent(g, event) {
-					return nil
+					return g.FinalizeScore()
 				}
 			}
 		}
 
 		width, height := terminalDimensions(input)
 		g.SetViewport(width, height)
-		g.Update(now.Sub(lastFrame))
+		if err := updateGame(g, now.Sub(lastFrame)); err != nil {
+			return err
+		}
 		lastFrame = now
 
 		if _, err := io.WriteString(output, Render(g, width, height)); err != nil {
@@ -66,6 +69,15 @@ func Run(g *game.Game) error {
 		}
 	}
 
+	return nil
+}
+
+func updateGame(g *game.Game, dt time.Duration) error {
+	wasGameOver := g.GameOver()
+	g.Update(dt)
+	if !wasGameOver && g.GameOver() {
+		return g.FinalizeScore()
+	}
 	return nil
 }
 
@@ -122,6 +134,10 @@ func handleEvent(g *game.Game, event Event) bool {
 		if g.InPort() {
 			g.BuyPortUpgrade()
 		}
+	case EventMuteToggle:
+		g.ToggleMute()
+	case EventGoldCheat:
+		g.AddGold(goldCheatAmount)
 	case EventQuit:
 		return true
 	}
